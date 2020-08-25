@@ -54,7 +54,6 @@ func (db *DB) SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, stop fun
 		defer close(chunks)
 		// sinceItem is the Item from which the next iteration
 		// should start. The first iteration starts from the first Item.
-		var sinceItem *shed.Item
 		for {
 			select {
 			case <-trigger:
@@ -65,7 +64,6 @@ func (db *DB) SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, stop fun
 				db.metrics.SubscribePushIteration.Inc()
 
 				iterStart := time.Now()
-				var count int
 				err := db.pushIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 					// get chunk data
 					dataItem, err := db.retrievalDataIndex.Get(item)
@@ -75,10 +73,6 @@ func (db *DB) SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, stop fun
 
 					select {
 					case chunks <- swarm.NewChunk(swarm.NewAddress(dataItem.Address), dataItem.Data).WithTagID(item.Tag):
-						count++
-						// set next iteration start item
-						// when its chunk is successfully sent to channel
-						sinceItem = &item
 						return false, nil
 					case <-stopChan:
 						// gracefully stop the iteration
@@ -91,12 +85,7 @@ func (db *DB) SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, stop fun
 					case <-ctx.Done():
 						return true, ctx.Err()
 					}
-				}, &shed.IterateOptions{
-					StartFrom: sinceItem,
-					// sinceItem was sent as the last Address in the previous
-					// iterator call, skip it in this one
-					SkipStartFromItem: true,
-				})
+				}, nil)
 
 				totalTimeMetric(db.metrics.TotalTimeSubscribePushIteration, iterStart)
 

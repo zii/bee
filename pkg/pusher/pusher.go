@@ -47,11 +47,6 @@ func New(storer storage.Storer, peerSuggester topology.ClosestPeerer, pushSyncer
 // chunksWorker is a loop that keeps looking for chunks that are locally uploaded ( by monitoring pushIndex )
 // and pushes them to the closest peer and get a receipt.
 func (s *Service) chunksWorker() {
-	var chunks <-chan swarm.Chunk
-	var unsubscribe func()
-	// timer, initially set to 0 to fall through select case on timer.C for initialisation
-	timer := time.NewTimer(0)
-	defer timer.Stop()
 	defer close(s.chunksWorkerQuitC)
 	chunksInBatch := -1
 	ctx, cancel := context.WithCancel(context.Background())
@@ -64,6 +59,8 @@ func (s *Service) chunksWorker() {
 	inflight := make(map[string]struct{})
 	var mtx sync.Mutex
 
+	chunks, unsubscribe := s.storer.SubscribePush(ctx)
+
 LOOP:
 	for {
 		select {
@@ -71,17 +68,26 @@ LOOP:
 		case ch, more := <-chunks:
 			// if no more, set to nil, reset timer to 0 to finalise batch immediately
 			if !more {
-				chunks = nil
-				var dur time.Duration
-				if chunksInBatch == 0 {
-					dur = 500 * time.Millisecond
+				select {
+				case <-time.After(retryInterval):
+				case <-s.quit:
+					if unsubscribe != nil {
+						unsubscribe()
+					}
+					break LOOP
 				}
-				timer.Reset(dur)
+				// if subscribe was running, stop it
+				if unsubscribe != nil {
+					unsubscribe()
+				}
+
+				// and start iterating on Push index from the beginning
+				chunks, unsubscribe = s.storer.SubscribePush(ctx)
 				break
 			}
 
 			// postpone a retry only after we've finished processing everything in index
-			timer.Reset(retryInterval)
+			//timer.Reset(retryInterval)
 			chunksInBatch++
 			s.metrics.TotalChunksToBeSentCounter.Inc()
 			select {
@@ -125,21 +131,6 @@ LOOP:
 				}
 				s.setChunkAsSynced(ctx, ch)
 			}(ctx, ch)
-		case <-timer.C:
-			// initially timer is set to go off as well as every time we hit the end of push index
-			startTime := time.Now()
-
-			// if subscribe was running, stop it
-			if unsubscribe != nil {
-				unsubscribe()
-			}
-
-			// and start iterating on Push index from the beginning
-			chunks, unsubscribe = s.storer.SubscribePush(ctx)
-
-			// reset timer to go off after retryInterval
-			timer.Reset(retryInterval)
-			s.metrics.MarkAndSweepTimer.Observe(time.Since(startTime).Seconds())
 
 		case <-s.quit:
 			if unsubscribe != nil {
