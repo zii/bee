@@ -55,7 +55,7 @@ func (s *Service) chunksWorker() {
 		cancel()
 	}()
 
-	sem := make(chan struct{}, 10)
+	sem := make(chan struct{}, 100)
 	inflight := make(map[string]struct{})
 	var mtx sync.Mutex
 
