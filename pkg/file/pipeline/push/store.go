@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package pushstore
+package push
 
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ethersphere/bee/pkg/file/pipeline"
 	"github.com/ethersphere/bee/pkg/pushsync"
@@ -14,14 +15,14 @@ import (
 
 var errInvalidData = errors.New("store: invalid data")
 
-type storeWriter struct {
+type pushWriter struct {
 	p    pushsync.PushSyncer
 	ctx  context.Context
 	next pipeline.ChainWriter
 }
 
-// NewStoreWriter returns a storeWriter. It just writes the given data
-// to a given storage.Putter.
+// NewPushSyncWriter returns a pushWriter. It writes the given data to the network
+// using the PushSyncer.
 func NewPushSyncWriter(ctx context.Context, p pushsync.PushSyncer, next pipeline.ChainWriter) pipeline.ChainWriter {
 	return &storeWriter{ctx: ctx, p: p, next: next}
 }
@@ -31,7 +32,11 @@ func (w *storeWriter) ChainWrite(p *pipeline.PipeWriteArgs) error {
 PUSH:
 	_, err = w.p.PushChunkToClosest()
 	if err != nil {
+		fmt.Println("push err", err)
 		goto PUSH
+	}
+	if w.next == nil {
+		return nil
 	}
 
 	return w.next.ChainWrite(p)
