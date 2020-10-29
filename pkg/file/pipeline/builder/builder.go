@@ -16,12 +16,13 @@ import (
 	"github.com/ethersphere/bee/pkg/file/pipeline/feeder"
 	"github.com/ethersphere/bee/pkg/file/pipeline/hashtrie"
 	"github.com/ethersphere/bee/pkg/file/pipeline/store"
+	"github.com/ethersphere/bee/pkg/pushsync"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
 )
 
 // NewPipelineBuilder returns the appropriate pipeline according to the specified parameters
-func NewPipelineBuilder(ctx context.Context, s storage.Putter, mode storage.ModePut, encrypt bool) pipeline.Interface {
+func NewPipelineBuilder(ctx context.Context, s storage.Putter, push pushsync.PushSyncer, mode storage.ModePut, encrypt bool) pipeline.Interface {
 	if encrypt {
 		return newEncryptionPipeline(ctx, s, mode)
 	}

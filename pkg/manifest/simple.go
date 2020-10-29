@@ -110,7 +110,7 @@ func (m *simpleManifest) Store(ctx context.Context, mode storage.ModePut) (swarm
 		return swarm.ZeroAddress, fmt.Errorf("manifest marshal error: %w", err)
 	}
 
-	pipe := builder.NewPipelineBuilder(ctx, m.storer, mode, m.encrypted)
+	pipe := builder.NewPipelineBuilder(ctx, m.storer, nil, mode, m.encrypted)
 	address, err := builder.FeedPipeline(ctx, pipe, bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return swarm.ZeroAddress, fmt.Errorf("manifest save error: %w", err)

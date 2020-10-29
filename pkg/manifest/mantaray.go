@@ -13,6 +13,7 @@ import (
 	"github.com/ethersphere/bee/pkg/file"
 	"github.com/ethersphere/bee/pkg/file/joiner"
 	"github.com/ethersphere/bee/pkg/file/pipeline/builder"
+	"github.com/ethersphere/bee/pkg/pushsync"
 	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/ethersphere/manifest/mantaray"
@@ -126,10 +127,11 @@ func (m *mantarayManifest) Store(ctx context.Context, mode storage.ModePut) (swa
 
 // mantarayLoadSaver implements required interface 'mantaray.LoadSaver'
 type mantarayLoadSaver struct {
-	ctx       context.Context
-	encrypted bool
-	storer    storage.Storer
-	modePut   storage.ModePut
+	ctx        context.Context
+	encrypted  bool
+	storer     storage.Storer
+	pushSyncer pushsync.PushSyncer
+	modePut    storage.ModePut
 }
 
 func newMantarayLoader(
@@ -178,7 +180,7 @@ func (ls *mantarayLoadSaver) Load(ref []byte) ([]byte, error) {
 func (ls *mantarayLoadSaver) Save(data []byte) ([]byte, error) {
 	ctx := ls.ctx
 
-	pipe := builder.NewPipelineBuilder(ctx, ls.storer, ls.modePut, ls.encrypted)
+	pipe := builder.NewPipelineBuilder(ctx, ls.storer, nil, ls.modePut, ls.encrypted)
 	address, err := builder.FeedPipeline(ctx, pipe, bytes.NewReader(data), int64(len(data)))
 
 	if err != nil {

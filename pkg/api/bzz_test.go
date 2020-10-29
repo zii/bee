@@ -42,7 +42,7 @@ func TestBzz(t *testing.T) {
 			Logger: logging.New(ioutil.Discard, 5),
 		})
 		pipeWriteAll = func(r io.Reader, l int64) (swarm.Address, error) {
-			pipe := builder.NewPipelineBuilder(ctx, storer, storage.ModePutUpload, false)
+			pipe := builder.NewPipelineBuilder(ctx, storer, nil, storage.ModePutUpload, false)
 			return builder.FeedPipeline(ctx, pipe, r, l)
 		}
 	)

@@ -412,7 +412,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	var apiService api.Service
 	if o.APIAddr != "" {
 		// API server
-		apiService = api.New(tagService, ns, multiResolver, pssService, logger, tracer, api.Options{
+		apiService = api.New(tagService, ns, pushSyncProtocol, multiResolver, pssService, logger, tracer, api.Options{
 			CORSAllowedOrigins: o.CORSAllowedOrigins,
 			GatewayMode:        o.GatewayMode,
 			WsPingPeriod:       60 * time.Second,
