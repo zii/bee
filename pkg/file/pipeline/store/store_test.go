@@ -40,7 +40,6 @@ func TestStoreWriter(t *testing.T) {
 			ref:  []byte{0xaa, 0xbb, 0xcc},
 			data: []byte("hello world"),
 		},
-		{},
 	} {
 		args := pipeline.PipeWriteArgs{Ref: tc.ref, Data: tc.data}
 		err := writer.ChainWrite(&args)
