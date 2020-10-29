@@ -11,6 +11,7 @@ import (
 
 	"github.com/ethersphere/bee/pkg/file/pipeline"
 	"github.com/ethersphere/bee/pkg/pushsync"
+	"github.com/ethersphere/bee/pkg/swarm"
 )
 
 var errInvalidData = errors.New("store: invalid data")
@@ -24,13 +25,15 @@ type pushWriter struct {
 // NewPushSyncWriter returns a pushWriter. It writes the given data to the network
 // using the PushSyncer.
 func NewPushSyncWriter(ctx context.Context, p pushsync.PushSyncer, next pipeline.ChainWriter) pipeline.ChainWriter {
-	return &storeWriter{ctx: ctx, p: p, next: next}
+	return &pushWriter{ctx: ctx, p: p, next: next}
 }
 
-func (w *storeWriter) ChainWrite(p *pipeline.PipeWriteArgs) error {
+func (w *pushWriter) ChainWrite(p *pipeline.PipeWriteArgs) error {
 	var err error
 PUSH:
-	_, err = w.p.PushChunkToClosest()
+
+	c := swarm.NewChunk(swarm.NewAddress(p.Ref), p.Data)
+	_, err = w.p.PushChunkToClosest(w.ctx, c)
 	if err != nil {
 		fmt.Println("push err", err)
 		goto PUSH
@@ -42,6 +45,6 @@ PUSH:
 	return w.next.ChainWrite(p)
 }
 
-func (w *storeWriter) Sum() ([]byte, error) {
+func (w *pushWriter) Sum() ([]byte, error) {
 	return w.next.Sum()
 }

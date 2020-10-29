@@ -23,11 +23,11 @@ import (
 )
 
 // NewPipelineBuilder returns the appropriate pipeline according to the specified parameters
-func NewPipelineBuilder(ctx context.Context, s storage.Putter, push pushsync.PushSyncer, mode storage.ModePut, encrypt bool) pipeline.Interface {
+func NewPipelineBuilder(ctx context.Context, s storage.Putter, p pushsync.PushSyncer, mode storage.ModePut, encrypt bool) pipeline.Interface {
 	if encrypt {
 		return newEncryptionPipeline(ctx, s, mode)
 	}
-	if push != nil {
+	if p != nil {
 		return newPushingPipeline(ctx, p, mode)
 	}
 	return newPipeline(ctx, s, mode)
