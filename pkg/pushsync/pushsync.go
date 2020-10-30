@@ -114,6 +114,9 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 		return err
 	}
 
+	// the logic below must have a retry logic, similarly to the retry logic in the retrieval protocol
+	// i.e. if we fail one peer we should try another
+
 	// This is a special situation in that the other peer thinks thats we are the closest node
 	// and we think that the sending peer is the closest
 	if p.Address.Equal(peer) {
@@ -219,6 +222,9 @@ func (ps *PushSync) PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Re
 	span, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-push", ps.logger, opentracing.Tag{Key: "address", Value: ch.Address().String()})
 	defer span.Finish()
 
+	// this needs to change, when we push we'd like to push to the closest peer excluding ourselves
+	// i.e. we want all chunks out the door in any case. on the handler we then should have a different
+	// "closestPeer" method that _does_ take the node address into account (so that it doesnt forward forever)
 	peer, err := ps.peerSuggester.ClosestPeer(ch.Address())
 	if err != nil {
 		if errors.Is(err, topology.ErrWantSelf) {
@@ -238,6 +244,9 @@ func (ps *PushSync) PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Re
 		}
 		return nil, fmt.Errorf("closest peer: %w", err)
 	}
+
+	// the logic below must have a retry logic, similarly to the retry logic in the retrieval protocol
+	// i.e. if we fail one peer we should try another
 
 	// compute the price we pay for this receipt and reserve it for the rest of this function
 	receiptPrice := ps.pricer.PeerPrice(peer, ch.Address())
