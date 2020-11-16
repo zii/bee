@@ -6,6 +6,7 @@ package transaction
 
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -15,6 +16,10 @@ import (
 	"github.com/ethersphere/bee/pkg/crypto"
 	"github.com/ethersphere/bee/pkg/logging"
 	"golang.org/x/net/context"
+)
+
+const (
+	RpcErrorTransactionNotFound = "not found"
 )
 
 var (
@@ -36,6 +41,8 @@ type Service interface {
 	Send(ctx context.Context, request *TxRequest) (txHash common.Hash, err error)
 	// WaitForReceipt waits until either the transaction with the given hash has been mined or the context is cancelled.
 	WaitForReceipt(ctx context.Context, txHash common.Hash) (receipt *types.Receipt, err error)
+	// WatchForReceipt watches the transaction in the background until the context is cancelled or there is an unexpected backend error
+	WatchForReceipt(ctx context.Context, txHash common.Hash) (chan *types.Receipt, chan error)
 }
 
 type transactionService struct {
@@ -79,18 +86,45 @@ func (t *transactionService) Send(ctx context.Context, request *TxRequest) (txHa
 	return signedTx.Hash(), nil
 }
 
+// tryGetReceipt tries to get the receipt from the backend
+// treats "not found" errors as pending transactions and every other error as an actual one
+func (t *transactionService) tryGetReceipt(ctx context.Context, txHash common.Hash) (receipt *types.Receipt, err error) {
+	_, pending, err := t.backend.TransactionByHash(ctx, txHash)
+	if err != nil {
+		// some clients report "not found" as error, others just return a nil receipt
+		// other errors should not be ignored which is why we match here explicitly
+		if err.Error() == RpcErrorTransactionNotFound {
+			t.logger.Tracef("could not find transaction %x on backend", txHash)
+			return nil, nil
+		} else {
+			return nil, fmt.Errorf("could not get transaction from backend: %w", err)
+		}
+	}
+
+	if pending {
+		t.logger.Tracef("waiting for transaction %x to be mined", txHash)
+		return nil, nil
+	}
+
+	receipt, err = t.backend.TransactionReceipt(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	if receipt == nil {
+		return nil, errors.New("did not get receipt")
+	}
+	return receipt, nil
+}
+
 // WaitForReceipt waits until either the transaction with the given hash has been mined or the context is cancelled.
 func (t *transactionService) WaitForReceipt(ctx context.Context, txHash common.Hash) (receipt *types.Receipt, err error) {
 	for {
-		receipt, err := t.backend.TransactionReceipt(ctx, txHash)
+		receipt, err := t.tryGetReceipt(ctx, txHash)
+		if err != nil {
+			return nil, err
+		}
 		if receipt != nil {
 			return receipt, nil
-		}
-		if err != nil {
-			// some node implementations return an error if the transaction is not yet mined
-			t.logger.Tracef("waiting for transaction %x to be mined: %v", txHash, err)
-		} else {
-			t.logger.Tracef("waiting for transaction %x to be mined", txHash)
 		}
 
 		select {
@@ -140,4 +174,37 @@ func prepareTransaction(ctx context.Context, request *TxRequest, from common.Add
 		gasPrice,
 		request.Data,
 	), nil
+}
+
+// WatchForReceipt watches the transaction in the background until the context is cancelled or there is an unexpected backend error
+func (t *transactionService) WatchForReceipt(ctx context.Context, txHash common.Hash) (chan *types.Receipt, chan error) {
+	receiptC := make(chan *types.Receipt)
+	errC := make(chan error)
+	go func() {
+		defer close(receiptC)
+		defer close(errC)
+
+		for {
+			// try to get the receipt and in case of error abort immediately
+			receipt, err := t.tryGetReceipt(ctx, txHash)
+			if err != nil {
+				errC <- err
+				return
+			}
+
+			if receipt != nil {
+				receiptC <- receipt
+				return
+			}
+
+			// wait some time until next check and abort if context is cancelled
+			select {
+			case <-ctx.Done():
+				errC <- ctx.Err()
+				return
+			case <-time.After(1 * time.Second):
+			}
+		}
+	}()
+	return receiptC, errC
 }

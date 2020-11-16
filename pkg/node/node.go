@@ -76,6 +76,7 @@ type Bee struct {
 	pullerCloser          io.Closer
 	pullSyncCloser        io.Closer
 	pssCloser             io.Closer
+	cashoutCloser         io.Closer
 	recoveryHandleCleanup func()
 }
 
@@ -204,10 +205,12 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 
 		chequeStore = chequebook.NewChequeStore(stateStore, swapBackend, chequebookFactory, chainID.Int64(), overlayEthAddress, chequebook.NewSimpleSwapBindings, chequebook.RecoverCheque)
 
-		cashoutService, err = chequebook.NewCashoutService(stateStore, chequebook.NewSimpleSwapBindings, swapBackend, transactionService, chequeStore)
+		cashoutService, err = chequebook.NewCashoutService(logger, stateStore, chequebook.NewSimpleSwapBindings, swapBackend, transactionService, chequeStore)
 		if err != nil {
 			return nil, err
 		}
+
+		b.cashoutCloser = cashoutService
 	}
 
 	p2ps, err := libp2p.New(p2pCtx, signer, networkID, swarmAddress, addr, addressbook, stateStore, logger, tracer, libp2p.Options{
@@ -275,6 +278,10 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		swapAddressBook := swap.NewAddressbook(stateStore)
 		swapService = swap.New(swapProtocol, logger, stateStore, chequebookService, chequeStore, swapAddressBook, networkID, cashoutService, p2ps)
 		swapProtocol.SetSwap(swapService)
+		cashoutService.SetNotifyBouncedFunc(swapService.NotifyBounced)
+		if err = cashoutService.Start(); err != nil {
+			return nil, fmt.Errorf("could not start cashout service: %w", err)
+		}
 		if err = p2ps.AddProtocol(swapProtocol.Protocol()); err != nil {
 			return nil, fmt.Errorf("swap protocol: %w", err)
 		}
@@ -512,6 +519,10 @@ func (b *Bee) Shutdown(ctx context.Context) error {
 
 	if b.recoveryHandleCleanup != nil {
 		b.recoveryHandleCleanup()
+	}
+
+	if err := b.cashoutCloser.Close(); err != nil {
+		errs.add(fmt.Errorf("cashout: %w", err))
 	}
 
 	if err := b.pusherCloser.Close(); err != nil {

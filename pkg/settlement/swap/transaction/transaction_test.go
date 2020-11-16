@@ -106,6 +106,9 @@ func TestTransactionWaitForReceipt(t *testing.T) {
 
 	transactionService, err := transaction.NewService(logger,
 		backendmock.New(
+			backendmock.WithTransactionByHashFunc(func(ctx context.Context, txHash common.Hash) (*types.Transaction, bool, error) {
+				return &types.Transaction{}, false, nil
+			}),
 			backendmock.WithTransactionReceiptFunc(func(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 				return &types.Receipt{
 					TxHash: txHash,

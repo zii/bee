@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethersphere/bee/pkg/crypto"
@@ -332,4 +333,17 @@ func (s *Service) CashoutStatus(ctx context.Context, peer swarm.Address) (*chequ
 		return nil, chequebook.ErrNoCheque
 	}
 	return s.cashout.CashoutStatus(ctx, chequebookAddress)
+}
+
+// NotifyBounced is used to notify swap about a bouncing chequebook
+func (s *Service) NotifyBounced(chequebook common.Address) error {
+	peer, known, err := s.addressbook.ChequebookPeer(chequebook)
+	if err != nil {
+		return err
+	}
+	if !known {
+		return errors.New("unknown peer")
+	}
+
+	return s.p2pService.Blocklist(peer, 100000*time.Hour)
 }

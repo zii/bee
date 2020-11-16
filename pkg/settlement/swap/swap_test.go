@@ -87,6 +87,18 @@ func (m *cashoutMock) CashoutStatus(ctx context.Context, chequebookAddress commo
 	return m.cashoutStatus(ctx, chequebookAddress)
 }
 
+func (m *cashoutMock) SetNotifyBouncedFunc(f chequebook.NotifyBouncedFunc) {
+
+}
+
+func (m *cashoutMock) Start() error {
+	return nil
+}
+
+func (m *cashoutMock) Close() error {
+	return nil
+}
+
 func TestReceiveCheque(t *testing.T) {
 	logger := logging.New(ioutil.Discard, 0)
 	store := mockstore.NewStateStore()
