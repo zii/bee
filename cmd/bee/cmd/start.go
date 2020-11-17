@@ -10,7 +10,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"io/ioutil"
-
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -266,10 +266,18 @@ Welcome to the Swarm.... Bzzz Bzzzz Bzzzz
 				Description: "Bee, Swarm client.",
 			})
 			if err != nil {
-				return err
+				log.Fatal(err)
+			}
+			logger2, err := s.Logger(nil)
+			if err != nil {
+				log.Fatal(err)
+			}
+			err = s.Run()
+			if err != nil {
+				logger2.Error(err)
 			}
 
-			return s.Run()
+			return err
 		},
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return c.config.BindPFlags(cmd.Flags())
