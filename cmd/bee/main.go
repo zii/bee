@@ -45,8 +45,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = s.Run()
+	logger, err := s.Logger(nil)
 	if err != nil {
 		log.Fatal(err)
 	}
+	err = s.Run()
+	if err != nil {
+		logger.Error(err)
+	}
+
 }
