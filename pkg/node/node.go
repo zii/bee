@@ -289,7 +289,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		settlement = pseudosettleService
 	}
 
-	pricing := pricing.New(p2ps, logger, o.PaymentThreshold)
+	pricing := pricing.New(p2ps, logger, o.PaymentThreshold, stateStore)
 	if err = p2ps.AddProtocol(pricing.Protocol()); err != nil {
 		return nil, fmt.Errorf("pricing service: %w", err)
 	}

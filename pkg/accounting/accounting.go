@@ -25,6 +25,7 @@ var (
 	_                     Interface = (*Accounting)(nil)
 	balancesPrefix        string    = "balance_"
 	balancesSurplusPrefix string    = "surplusbalance_"
+	priceTablePrefix      string    = "pricetable_"
 )
 
 // Interface is the Accounting interface.
@@ -56,8 +57,10 @@ type Interface interface {
 // accountingPeer holds all in-memory accounting information for one peer.
 type accountingPeer struct {
 	lock             sync.Mutex // lock to be held during any accounting action for this peer
+	tableLock        sync.Mutex // lock to be held during read or write of price table
 	reservedBalance  uint64     // amount currently reserved for active peer interaction
 	paymentThreshold uint64     // the threshold at which the peer expects us to pay
+	priceTable       []uint64
 }
 
 // Accounting is the main implementation of the accounting interface.
@@ -463,6 +466,16 @@ func peerSurplusBalanceKey(peer swarm.Address) string {
 	return fmt.Sprintf("%s%s", balancesSurplusPrefix, peer.String())
 }
 
+// peerPriceTableKey returns the price table storage key for the given peer.
+func peerPriceTableKey(peer swarm.Address) string {
+	return fmt.Sprintf("%s%s", priceTablePrefix, peer.String())
+}
+
+// PriceTableKey returns the price table storage key for own price table
+func PriceTableKey() string {
+	return fmt.Sprintf("%s%s", priceTablePrefix, "self")
+}
+
 // getAccountingPeer returns the accountingPeer for a given swarm address.
 // If not found in memory it will initialize it.
 func (a *Accounting) getAccountingPeer(peer swarm.Address) (*accountingPeer, error) {
@@ -764,5 +777,23 @@ func (a *Accounting) NotifyPaymentThreshold(peer swarm.Address, paymentThreshold
 	defer accountingPeer.lock.Unlock()
 
 	accountingPeer.paymentThreshold = paymentThreshold
+	return nil
+}
+
+func (a *Accounting) NotifyPriceTable(peer swarm.Address, priceTable []uint64) error {
+	accountingPeer, err := a.getAccountingPeer(peer)
+	if err != nil {
+		return err
+	}
+
+	accountingPeer.tableLock.Lock()
+	defer accountingPeer.tableLock.Unlock()
+
+	accountingPeer.priceTable = priceTable
+
+	err = a.store.Put(peerPriceTableKey(peer), priceTable)
+	if err != nil {
+		return fmt.Errorf("failed to persist price table: %w", err)
+	}
 	return nil
 }

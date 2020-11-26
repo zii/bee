@@ -13,6 +13,7 @@ import (
 	"github.com/ethersphere/bee/pkg/p2p"
 	"github.com/ethersphere/bee/pkg/p2p/protobuf"
 	"github.com/ethersphere/bee/pkg/pricing/pb"
+	"github.com/ethersphere/bee/pkg/storage"
 	"github.com/ethersphere/bee/pkg/swarm"
 )
 
@@ -34,18 +35,35 @@ type PaymentThresholdObserver interface {
 	NotifyPaymentThreshold(peer swarm.Address, paymentThreshold uint64) error
 }
 
+// PriceTableObserver is used for being notified of price table updates
+type PriceTableObserver interface {
+	NotifyPriceTable(peer swarm.Address, priceTable []uint64) error
+}
+
 type Service struct {
 	streamer                 p2p.Streamer
 	logger                   logging.Logger
 	paymentThreshold         uint64
+	priceTable               []uint64
 	paymentThresholdObserver PaymentThresholdObserver
+	priceTableObserver       PriceTableObserver
+	store                    storage.StateStorer
 }
 
-func New(streamer p2p.Streamer, logger logging.Logger, paymentThreshold uint64) *Service {
+func New(streamer p2p.Streamer, logger logging.Logger, paymentThreshold uint64, store storage.StateStorer) *Service {
+
+	var priceTable []uint64
+	err := store.Get(accounting.PriceTableKey(), &priceTable)
+	if err != nil {
+		priceTable = DefaultPriceTable()
+	}
+
 	return &Service{
 		streamer:         streamer,
 		logger:           logger,
 		paymentThreshold: paymentThreshold,
+		priceTable:       priceTable,
+		store:            store,
 	}
 }
 
@@ -64,6 +82,11 @@ func (s *Service) Protocol() p2p.ProtocolSpec {
 	}
 }
 
+func (s *Service) PriceTable() []uint64 {
+
+	return
+}
+
 func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
 	r := protobuf.NewReader(stream)
 	defer func() {
@@ -76,19 +99,58 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 
 	var req pb.AnnouncePaymentThreshold
 	if err := r.ReadMsgWithContext(ctx, &req); err != nil {
-		s.logger.Debugf("error receiving payment threshold announcement from peer %v", p.Address)
+		s.logger.Debugf("error receiving payment threshold and/or price table announcement from peer %v", p.Address)
 		return fmt.Errorf("read request from peer %v: %w", p.Address, err)
 	}
-	s.logger.Tracef("received payment threshold announcement from peer %v of %d", p.Address, req.PaymentThreshold)
+	s.logger.Tracef("received payment threshold and/or price table announcement from peer %v of %d", p.Address, req.PaymentThreshold)
+
+	if req.PriceTable != nil {
+		err = s.priceTableObserver.NotifyPriceTable(p.Address, req.PriceTable)
+		if err != nil {
+			s.logger.Debugf("error receiving pricetable from peer %v: %w", p.Address, err)
+			s.logger.Errorf("error receiving pricetable from peer %v: %w", p.Address, err)
+		}
+	}
+
+	if req.PaymentThreshold == 0 {
+		return err
+	}
 
 	return s.paymentThresholdObserver.NotifyPaymentThreshold(p.Address, req.PaymentThreshold)
 }
 
 func (s *Service) init(ctx context.Context, p p2p.Peer) error {
-	err := s.AnnouncePaymentThreshold(ctx, p.Address, s.paymentThreshold)
+	err := s.AnnouncePaymentThresholdAndPriceTable(ctx, p.Address, s.paymentThreshold, s.priceTable)
 	if err != nil {
 		s.logger.Warningf("error sending payment threshold announcement to peer %v", p.Address)
 	}
+	return err
+}
+
+// AnnouncePaymentThreshold announces the payment threshold to per
+func (s *Service) AnnouncePaymentThresholdAndPriceTable(ctx context.Context, peer swarm.Address, paymentThreshold uint64, priceTable []uint64) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	stream, err := s.streamer.NewStream(ctx, peer, nil, protocolName, protocolVersion, streamName)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = stream.Reset()
+		} else {
+			go stream.FullClose()
+		}
+	}()
+
+	s.logger.Tracef("sending payment threshold announcement to peer %v of %d", peer, paymentThreshold)
+	w := protobuf.NewWriter(stream)
+	err = w.WriteMsgWithContext(ctx, &pb.AnnouncePaymentThreshold{
+		PaymentThreshold: paymentThreshold,
+		PriceTable:       priceTable,
+	})
+
 	return err
 }
 
@@ -121,4 +183,9 @@ func (s *Service) AnnouncePaymentThreshold(ctx context.Context, peer swarm.Addre
 // SetPaymentThresholdObserver sets the PaymentThresholdObserver to be used when receiving a new payment threshold
 func (s *Service) SetPaymentThresholdObserver(observer PaymentThresholdObserver) {
 	s.paymentThresholdObserver = observer
+}
+
+// SetPaymentThresholdObserver sets the PaymentThresholdObserver to be used when receiving a new payment threshold
+func (s *Service) SetPriceTableObserver(observer PriceTableObserver) {
+	s.priceTableObserver = observer
 }

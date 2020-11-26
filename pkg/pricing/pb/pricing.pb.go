@@ -23,7 +23,8 @@ var _ = math.Inf
 const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 type AnnouncePaymentThreshold struct {
-	PaymentThreshold uint64 `protobuf:"varint,1,opt,name=PaymentThreshold,proto3" json:"PaymentThreshold,omitempty"`
+	PaymentThreshold uint64   `protobuf:"varint,1,opt,name=PaymentThreshold,proto3" json:"PaymentThreshold,omitempty"`
+	PriceTable       []uint64 `protobuf:"varint,1,opt,name=PriceTable,proto3" json:"PriceTable,omitempty"`
 }
 
 func (m *AnnouncePaymentThreshold) Reset()         { *m = AnnouncePaymentThreshold{} }
