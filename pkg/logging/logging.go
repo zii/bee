@@ -32,7 +32,7 @@ type logger struct {
 	metrics metrics
 }
 
-func New(w io.Writer, level logrus.Level) Logger {
+func New(w io.Writer, level logrus.Level, hooks ...logrus.Hook) Logger {
 	l := logrus.New()
 	l.SetOutput(w)
 	l.SetLevel(level)
@@ -41,6 +41,9 @@ func New(w io.Writer, level logrus.Level) Logger {
 	}
 	metrics := newMetrics()
 	l.AddHook(metrics)
+	for _, hook := range hooks {
+		l.AddHook(hook)
+	}
 	return &logger{
 		Logger:  l,
 		metrics: metrics,
