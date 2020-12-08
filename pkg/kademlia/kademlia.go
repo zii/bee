@@ -538,6 +538,11 @@ func (k *Kad) ClosestPeer(addr swarm.Address, skipPeers ...swarm.Address) (swarm
 
 		// kludge: hotfix for topology peer inconsistencies bug
 		if !isIn(peer, peers) {
+			if true {
+				msg := fmt.Sprintf("peer not expected: %s", peer.String())
+				k.logger.Error(msg)
+				panic(msg)
+			}
 			a := swarm.NewAddress(peer.Bytes())
 			peersToDisconnect = append(peersToDisconnect, a)
 			return false, false, nil
