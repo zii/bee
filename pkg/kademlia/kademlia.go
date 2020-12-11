@@ -171,6 +171,7 @@ func (k *Kad) manage() {
 				err = k.connect(ctx, peer, bzzAddr.Underlay, po)
 				if err != nil {
 					if errors.Is(err, errOverlayMismatch) {
+						k.logger.Errorf("removing peer from addressbook: %s: %v", peer.String(), err) //TODO: remove
 						k.knownPeers.Remove(peer, po)
 						if err := k.addressBook.Remove(peer); err != nil {
 							k.logger.Debugf("could not remove peer from addressbook: %s", peer.String())
@@ -210,6 +211,7 @@ func (k *Kad) manage() {
 
 			if err != nil {
 				if errors.Is(err, errMissingAddressBookEntry) {
+					k.logger.Errorf("removing peer from addressbook: %s: %v", peerToRemove.String(), err) //TODO: remove
 					po := swarm.Proximity(k.base.Bytes(), peerToRemove.Bytes())
 					k.knownPeers.Remove(peerToRemove, po)
 				} else {
