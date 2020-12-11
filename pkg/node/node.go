@@ -139,6 +139,18 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	b.stateStoreCloser = stateStore
 	addressbook := addressbook.New(stateStore)
 
+	//TODO: remove
+	{
+		addresses, err := addressbook.Addresses()
+		if err != nil {
+			panic(err)
+		}
+
+		for i, a := range addresses {
+			logger.Errorf("addressbook address [%d]: %s", i, a.String())
+		}
+	}
+
 	var chequebookService chequebook.Service
 	var chequeStore chequebook.ChequeStore
 	var cashoutService chequebook.CashoutService
