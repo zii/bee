@@ -180,6 +180,10 @@ func (db *DB) pinUnpinSingle(batch *leveldb.Batch, addr swarm.Address) (err erro
 
 	pinnedItem, err := db.pinningIndex.Get(item)
 	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return storage.ErrNotFound
+		}
+
 		return err
 	}
 
@@ -194,6 +198,10 @@ func (db *DB) pinUnpinSingle(batch *leveldb.Batch, addr swarm.Address) (err erro
 
 		zeroPinnedItem, err := db.pinningIndex.Get(zeroItem)
 		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return storage.ErrNotFound
+			}
+
 			return err
 		}
 
@@ -278,6 +286,10 @@ func (db *DB) pinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (err er
 	// Get the existing pin counter of the chunk
 	pinnedItem, err := db.pinningIndex.Get(item)
 	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return storage.ErrNotFound
+		}
+
 		return err
 	}
 
@@ -347,6 +359,10 @@ func (db *DB) pinAddressesCompleted(batch *leveldb.Batch, rootAddr swarm.Address
 	err = db.pinningIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		_, err = db.retrievalAccessIndex.Get(item)
 		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return true, storage.ErrNotFound
+			}
+
 			return true, err
 		}
 
@@ -358,6 +374,10 @@ func (db *DB) pinAddressesCompleted(batch *leveldb.Batch, rootAddr swarm.Address
 		_, err = db.pinningIndex.Get(reverseIndexItem)
 		if err != nil {
 			// if missing maybe unpin was called before pin completed
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return true, storage.ErrNotFound
+			}
+
 			return true, err
 		}
 
@@ -390,6 +410,10 @@ func (db *DB) pinUnpinStarted(batch *leveldb.Batch, rootAddr swarm.Address) (err
 
 	_, err = db.pinningIndex.Get(item)
 	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return storage.ErrNotFound
+		}
+
 		return err
 	}
 
@@ -426,6 +450,10 @@ func (db *DB) pinUnpinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (e
 
 	zeroPinnedItem, err := db.pinningIndex.Get(zeroItem)
 	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return storage.ErrNotFound
+		}
+
 		return err
 	}
 
