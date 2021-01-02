@@ -115,6 +115,56 @@ const (
 	ModeSetUnpin
 )
 
+// ModePin enumerates different Pinning modes.
+type ModePin int
+
+func (m ModePin) String() string {
+	switch m {
+	case ModePinSingle:
+		return "PinSingle"
+	case ModePinUnpinSingle:
+		return "PinUnpinSingle"
+	case ModePinStarted:
+		return "PinStarted"
+	case ModePinCompleted:
+		return "PinCompleted"
+	case ModePinFoundAddress:
+		return "PinFoundAddress"
+	case ModePinAddressesCompleted:
+		return "PinAddressesCompleted"
+	case ModePinUnpinStarted:
+		return "PinUnpinStarted"
+	case ModePinUnpinCompleted:
+		return "PinUnpinCompleted"
+	case ModePinUnpinFoundAddress:
+		return "PinUnpinFoundAddress"
+	default:
+		return "Unknown"
+	}
+}
+
+// Pinning modes.
+const (
+	// ModePinSingle: when a chunk is pinned
+	ModePinSingle ModePin = iota
+	// ModePinUnpinSingle: when a chunk is unpinned
+	ModePinUnpinSingle
+	// ModePinStarted: when pinning for root address has started
+	ModePinStarted
+	// ModePinCompleted: when pinning for root address has completed
+	ModePinCompleted
+	// ModePinFoundAddress: when pinning address for some root address
+	ModePinFoundAddress
+	// ModePinAddressesCompleted: when pinned all addresses for root address
+	ModePinAddressesCompleted
+	// ModePinUnpinStarted: when unpinning for root address has started
+	ModePinUnpinStarted
+	// ModePinUnpinCompleted: when unpinning for root address has completed
+	ModePinUnpinCompleted
+	// ModePinUnpinFoundAddress: when unpinning address for some root address
+	ModePinUnpinFoundAddress
+)
+
 // Descriptor holds information required for Pull syncing. This struct
 // is provided by subscribing to pull index.
 type Descriptor struct {
@@ -144,8 +194,7 @@ type Storer interface {
 	LastPullSubscriptionBinID(bin uint8) (id uint64, err error)
 	PullSubscriber
 	SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, stop func())
-	PinnedChunks(ctx context.Context, offset, limit int) (pinnedChunks []*Pinner, err error)
-	PinCounter(address swarm.Address) (uint64, error)
+	Pinning
 	io.Closer
 }
 
@@ -164,6 +213,12 @@ type Setter interface {
 type Hasser interface {
 	Has(ctx context.Context, addr swarm.Address) (yes bool, err error)
 	HasMulti(ctx context.Context, addrs ...swarm.Address) (yes []bool, err error)
+}
+
+type Pinning interface {
+	Pin(ctx context.Context, mode ModePin, rootAddr, addr swarm.Address) (err error)
+	PinnedChunks(ctx context.Context, offset, limit int) (pinnedChunks []*Pinner, err error)
+	PinCounter(address swarm.Address) (uint64, error)
 }
 
 type PullSubscriber interface {

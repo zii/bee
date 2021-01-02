@@ -23,6 +23,7 @@ type metrics struct {
 	TotalTimeHasMulti               prometheus.Counter
 	TotalTimePut                    prometheus.Counter
 	TotalTimeSet                    prometheus.Counter
+	TotalTimePin                    prometheus.Counter
 	TotalTimeSubscribePullIteration prometheus.Counter
 	TotalTimeSubscribePushIteration prometheus.Counter
 
@@ -49,6 +50,8 @@ type metrics struct {
 	ModeHasFailure                prometheus.Counter
 	ModeHasMulti                  prometheus.Counter
 	ModeHasMultiFailure           prometheus.Counter
+	ModePin                       prometheus.Counter
+	ModePinFailure                prometheus.Counter
 	SubscribePull                 prometheus.Counter
 	SubscribePullStop             prometheus.Counter
 	SubscribePullIteration        prometheus.Counter
@@ -121,6 +124,12 @@ func newMetrics() metrics {
 			Subsystem: subsystem,
 			Name:      "set_time",
 			Help:      "Total time taken to set chunk in DB.",
+		}),
+		TotalTimePin: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "pin_time",
+			Help:      "Total time taken to pin chunk in DB.",
 		}),
 		TotalTimeSubscribePullIteration: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
@@ -266,6 +275,18 @@ func newMetrics() metrics {
 			Subsystem: subsystem,
 			Name:      "mode_has_multi_failure_count",
 			Help:      "Number of times MODE_HAS_MULTI invocation failed.",
+		}),
+		ModePin: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "mode_pin_count",
+			Help:      "Number of times MODE_PIN is invoked.",
+		}),
+		ModePinFailure: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "mode_pin_failure_count",
+			Help:      "Number of times MODE_PIN invocation failed.",
 		}),
 		SubscribePull: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,

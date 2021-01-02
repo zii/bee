@@ -85,6 +85,8 @@ type DB struct {
 
 	// pin files Index
 	pinIndex shed.Index
+	// pin files Index
+	pinningIndex shed.Index
 
 	// field that stores number of intems in gc index
 	gcSize shed.Uint64Field
@@ -381,6 +383,55 @@ func New(path string, baseKey []byte, o *Options, logger logging.Logger) (db *DB
 		return nil, err
 	}
 
+	// Create a index structure for storing pinned chunks and their pin counts
+	db.pinningIndex, err = db.shed.NewIndex("ParentHash|Hash->PinCounter", shed.IndexFuncs{
+		EncodeKey: func(fields shed.Item) (key []byte, err error) {
+			var keyLen int
+
+			// we will always have one or another address
+			if len(fields.ParentAddress) == len(fields.Address) {
+				keyLen = len(fields.ParentAddress) + len(fields.Address)
+			} else {
+				if len(fields.ParentAddress) > 0 {
+					keyLen = len(fields.ParentAddress) * 2
+				} else {
+					keyLen = len(fields.Address) * 2
+				}
+			}
+
+			key = make([]byte, keyLen)
+
+			if len(fields.ParentAddress) > 0 {
+				copy(key[:len(fields.ParentAddress)], fields.ParentAddress)
+			}
+			if len(fields.Address) > 0 {
+				copy(key[len(fields.Address):], fields.Address)
+			}
+
+			return key, nil
+		},
+		DecodeKey: func(key []byte) (e shed.Item, err error) {
+			keyLen := len(key)
+
+			e.ParentAddress = key[:keyLen/2]
+			e.Address = key[keyLen/2:]
+
+			return e, nil
+		},
+		EncodeValue: func(fields shed.Item) (value []byte, err error) {
+			b := make([]byte, 8)
+			binary.BigEndian.PutUint64(b[:8], fields.PinCounter)
+			return b, nil
+		},
+		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
+			e.PinCounter = binary.BigEndian.Uint64(value[:8])
+			return e, nil
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// Create a index structure for excluding pinned chunks from gcIndex
 	db.gcExcludeIndex, err = db.shed.NewIndex("Hash->nil", shed.IndexFuncs{
 		EncodeKey: func(fields shed.Item) (key []byte, err error) {
@@ -472,9 +523,10 @@ func (db *DB) DebugIndices() (indexInfo map[string]int, err error) {
 // chunkToItem creates new Item with data provided by the Chunk.
 func chunkToItem(ch swarm.Chunk) shed.Item {
 	return shed.Item{
-		Address: ch.Address().Bytes(),
-		Data:    ch.Data(),
-		Tag:     ch.TagID(),
+		Address:       ch.Address().Bytes(),
+		ParentAddress: ch.Address().Bytes(),
+		Data:          ch.Data(),
+		Tag:           ch.TagID(),
 	}
 }
 

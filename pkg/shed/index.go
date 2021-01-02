@@ -40,6 +40,7 @@ import (
 type Item struct {
 	Address         []byte
 	Data            []byte
+	ParentAddress   []byte
 	AccessTimestamp int64
 	StoreTimestamp  int64
 	BinID           uint64
@@ -56,6 +57,9 @@ func (i Item) Merge(i2 Item) Item {
 	}
 	if i.Data == nil {
 		i.Data = i2.Data
+	}
+	if i.ParentAddress == nil {
+		i.ParentAddress = i2.ParentAddress
 	}
 	if i.AccessTimestamp == 0 {
 		i.AccessTimestamp = i2.AccessTimestamp
