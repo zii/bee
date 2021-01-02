@@ -117,56 +117,49 @@ func (db *DB) pin(mode storage.ModePin, rootAddr, addr swarm.Address) (err error
 
 func (db *DB) pinSingle(batch *leveldb.Batch, addr swarm.Address) (err error) {
 	item := shed.Item{
-		Address:       addr.Bytes(),
 		ParentAddress: addr.Bytes(),
 	}
 
-	// Get the existing pin counter of the chunk
-	existingPinCounter := uint64(0)
-	pinnedItem, err := db.pinningIndex.Get(item)
+	has, err := db.pinningIndex.Has(item)
+	if err != nil {
+		return err
+	}
+
+	if has {
+		// already pinned
+		return nil
+	}
+
+	// item was not pinned previously
+	item.PinCounter = 1
+
+	err = db.pinningIndex.PutInBatch(batch, item)
+	if err != nil {
+		return err
+	}
+
+	zeroItem := addressToItem(addr)
+
+	// add in gcExcludeIndex if the chunk is not pinned already
+	err = db.gcExcludeIndex.PutInBatch(batch, zeroItem)
+	if err != nil {
+		return err
+	}
+
+	zeroPinnedItem, err := db.pinningIndex.Get(zeroItem)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			// if this Address is not present in DB, then it is a new entry
-			existingPinCounter = 0
-
-			// add in gcExcludeIndex if the chunk is not pinned already
-			err = db.gcExcludeIndex.PutInBatch(batch, item)
-			if err != nil {
-				return err
-			}
+			zeroItem.PinCounter = 1
 		} else {
 			return err
 		}
 	} else {
-		existingPinCounter = pinnedItem.PinCounter
+		zeroItem.PinCounter = zeroPinnedItem.PinCounter + 1
 	}
 
-	if existingPinCounter == 0 {
-		// item was not pinned previously
-		item.PinCounter = 1
-
-		err = db.pinningIndex.PutInBatch(batch, item)
-		if err != nil {
-			return err
-		}
-
-		zeroItem := addressToItem(addr)
-
-		zeroPinnedItem, err := db.pinningIndex.Get(zeroItem)
-		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				zeroItem.PinCounter = 1
-			} else {
-				return err
-			}
-		} else {
-			zeroItem.PinCounter = zeroPinnedItem.PinCounter + 1
-		}
-
-		err = db.pinningIndex.PutInBatch(batch, zeroItem)
-		if err != nil {
-			return err
-		}
+	err = db.pinningIndex.PutInBatch(batch, zeroItem)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -174,11 +167,10 @@ func (db *DB) pinSingle(batch *leveldb.Batch, addr swarm.Address) (err error) {
 
 func (db *DB) pinUnpinSingle(batch *leveldb.Batch, addr swarm.Address) (err error) {
 	item := shed.Item{
-		Address:       addr.Bytes(),
 		ParentAddress: addr.Bytes(),
 	}
 
-	pinnedItem, err := db.pinningIndex.Get(item)
+	_, err = db.pinningIndex.Get(item)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return storage.ErrNotFound
@@ -187,42 +179,39 @@ func (db *DB) pinUnpinSingle(batch *leveldb.Batch, addr swarm.Address) (err erro
 		return err
 	}
 
-	// NOTE: pin counter should be exactly `1`
-	if pinnedItem.PinCounter > 0 {
-		err = db.pinningIndex.DeleteInBatch(batch, item)
+	err = db.pinningIndex.DeleteInBatch(batch, item)
+	if err != nil {
+		return err
+	}
+
+	zeroItem := addressToItem(addr)
+
+	zeroPinnedItem, err := db.pinningIndex.Get(zeroItem)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return storage.ErrNotFound
+		}
+
+		return err
+	}
+
+	if zeroPinnedItem.PinCounter > 1 {
+		zeroItem.PinCounter = zeroPinnedItem.PinCounter - 1
+
+		err = db.pinningIndex.PutInBatch(batch, zeroItem)
+		if err != nil {
+			return err
+		}
+	} else {
+		err = db.pinningIndex.DeleteInBatch(batch, zeroItem)
 		if err != nil {
 			return err
 		}
 
-		zeroItem := addressToItem(addr)
-
-		zeroPinnedItem, err := db.pinningIndex.Get(zeroItem)
+		// remove from gcExcludeIndex
+		err = db.gcExcludeIndex.DeleteInBatch(batch, zeroItem)
 		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				return storage.ErrNotFound
-			}
-
 			return err
-		}
-
-		if zeroPinnedItem.PinCounter > 1 {
-			zeroItem.PinCounter = zeroPinnedItem.PinCounter - 1
-
-			err = db.pinningIndex.PutInBatch(batch, zeroItem)
-			if err != nil {
-				return err
-			}
-		} else {
-			err = db.pinningIndex.DeleteInBatch(batch, zeroItem)
-			if err != nil {
-				return err
-			}
-
-			// remove from gcExcludeIndex
-			err = db.gcExcludeIndex.DeleteInBatch(batch, zeroItem)
-			if err != nil {
-				return err
-			}
 		}
 	}
 
