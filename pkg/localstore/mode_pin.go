@@ -389,6 +389,19 @@ func (db *DB) pinAddressesCompleted(batch *leveldb.Batch, rootAddr swarm.Address
 		Prefix: rootAddr.Bytes(),
 	})
 
+	// mark root hash as completed
+	secondaryItem := shed.Item{
+		Address:       rootAddr.Bytes(),
+		ParentAddress: rootAddr.Bytes(),
+	}
+
+	secondaryItem.PinCounter = 0
+
+	err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
+	if err != nil {
+		return err
+	}
+
 	return err
 }
 
