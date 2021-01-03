@@ -25,7 +25,7 @@ func (db *DB) PinnedChunks(ctx context.Context, offset, limit int) (chunks []*st
 		limit = maxPage
 	}
 
-	c, err := db.pinningIndex.Count()
+	c, err := db.pinIndex.Count()
 	if err != nil {
 		return nil, fmt.Errorf("list pinned chunks: %w", err)
 	}
@@ -35,7 +35,7 @@ func (db *DB) PinnedChunks(ctx context.Context, offset, limit int) (chunks []*st
 		return nil, nil
 	}
 
-	err = db.pinningIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+	err = db.pinIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		if offset > 0 {
 			offset--
 			return false, nil
@@ -59,7 +59,7 @@ func (db *DB) PinnedChunks(ctx context.Context, offset, limit int) (chunks []*st
 // PinCounter returns the pin counter for a given swarm address, provided that the
 // address has been pinned.
 func (db *DB) PinCounter(address swarm.Address) (uint64, error) {
-	out, err := db.pinningIndex.Get(shed.Item{
+	out, err := db.pinIndex.Get(shed.Item{
 		Address: address.Bytes(),
 	})
 
