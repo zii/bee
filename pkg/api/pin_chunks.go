@@ -103,6 +103,7 @@ func (s *server) unpinChunk(w http.ResponseWriter, r *http.Request) {
 		jsonhttp.InternalServerError(w, "cannot unpin chunk")
 		return
 	}
+
 	jsonhttp.OK(w, nil)
 }
 
@@ -319,30 +320,18 @@ func (s *server) updatePinCount(ctx context.Context, reference swarm.Address, de
 	return nil
 }
 
-func (s *server) pinChunkAddressFn(ctx context.Context, reference swarm.Address) func(address swarm.Address) error {
+func (s *server) pinTraverseAddressesFn(ctx context.Context, reference swarm.Address) func(address swarm.Address) error {
 	return func(address swarm.Address) error {
-		// NOTE: stop pinning on first error
-
-		err := s.Storer.Set(ctx, storage.ModeSetPin, address)
+		// try to fetch chunk
+		_, err := s.Storer.Get(ctx, storage.ModeGetRequest, address)
 		if err != nil {
-			if errors.Is(err, storage.ErrNotFound) {
-				// chunk not found locally, try to get from netstore
-				ch, err := s.Storer.Get(ctx, storage.ModeGetRequest, address)
-				if err != nil {
-					s.Logger.Debugf("pin traversal: storer get: for reference %s, address %s: %w", reference, address, err)
-					return err
-				}
+			s.Logger.Debugf("pin traversal: storer pin found address: for reference %s, address %s: %w", reference, address, err)
+			return err
+		}
 
-				_, err = s.Storer.Put(ctx, storage.ModePutRequestPin, ch)
-				if err != nil {
-					s.Logger.Debugf("pin traversal: storer put pin: for reference %s, address %s: %w", reference, address, err)
-					return err
-				}
-
-				return nil
-			}
-
-			s.Logger.Debugf("pin traversal: storer set pin: for reference %s, address %s: %w", reference, address, err)
+		err = s.Storer.Pin(ctx, storage.ModePinFoundAddress, reference, address)
+		if err != nil {
+			s.Logger.Debugf("pin traversal: storer pin found address: for reference %s, address %s: %w", reference, address, err)
 			return err
 		}
 
@@ -350,19 +339,73 @@ func (s *server) pinChunkAddressFn(ctx context.Context, reference swarm.Address)
 	}
 }
 
-func (s *server) unpinChunkAddressFn(ctx context.Context, reference swarm.Address) func(address swarm.Address) error {
-	return func(address swarm.Address) error {
-		_, err := s.Storer.PinCounter(address)
-		if err != nil {
-			return err
+func (s *server) pinRootAddress(
+	ctx context.Context,
+	addr swarm.Address,
+	traverseFn func(context.Context, swarm.Address, swarm.AddressIterFunc) error,
+) error {
+
+	err := s.Storer.Pin(ctx, storage.ModePinStarted, addr, swarm.ZeroAddress)
+	if err != nil {
+		s.Logger.Debugf("pin: pinning start error: %v, addr %s", err, addr)
+
+		if errors.Is(err, storage.ErrAlreadyPinned) {
+			return nil
 		}
 
-		err = s.Storer.Set(ctx, storage.ModeSetUnpin, address)
-		if err != nil {
-			s.Logger.Debugf("unpin traversal: for reference %s, address %s: %w", reference, address, err)
-			// continue un-pinning all chunks
-		}
-
-		return nil
+		return err
 	}
+
+	chunkAddressFn := s.pinTraverseAddressesFn(ctx, addr)
+
+	err = traverseFn(ctx, addr, chunkAddressFn)
+	if err != nil {
+		s.Logger.Debugf("pin: traverse chunks: %v, addr %s", err, addr)
+
+		if errors.Is(err, storage.ErrIsUnpinned) {
+			// call unpin for addresses
+			if err := s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, addr, swarm.ZeroAddress); err != nil {
+				s.Logger.Debugf("pin: traverse chunks: unpinning found addresses: %v, addr %s", err, addr)
+				return err
+			}
+		}
+
+		return err
+	}
+
+	err = s.Storer.Pin(ctx, storage.ModePinCompleted, addr, swarm.ZeroAddress)
+	if err != nil {
+		s.Logger.Debugf("pin: pinning complete error: %v, addr %s", err, addr)
+
+		if errors.Is(err, storage.ErrAlreadyPinned) {
+			return nil
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+func (s *server) unpinRootAddress(ctx context.Context, addr swarm.Address) error {
+
+	err := s.Storer.Pin(ctx, storage.ModePinUnpinStarted, addr, swarm.ZeroAddress)
+	if err != nil {
+		s.Logger.Debugf("pin: unpinning start error: %v, addr %s", err, addr)
+		return err
+	}
+
+	err = s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, addr, swarm.ZeroAddress)
+	if err != nil {
+		s.Logger.Debugf("pin: unpinning found addresses error: %v, addr %s", err, addr)
+		return err
+	}
+
+	err = s.Storer.Pin(ctx, storage.ModePinUnpinCompleted, addr, swarm.ZeroAddress)
+	if err != nil {
+		s.Logger.Debugf("pin: unpinning complete error: %v, addr %s", err, addr)
+		return err
+	}
+
+	return nil
 }

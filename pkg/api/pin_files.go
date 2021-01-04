@@ -46,19 +46,17 @@ func (s *server) pinFile(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	chunkAddressFn := s.pinChunkAddressFn(ctx, addr)
-
-	err = s.Traversal.TraverseFileAddresses(ctx, addr, chunkAddressFn)
+	err = s.pinRootAddress(ctx, addr, s.Traversal.TraverseFileAddresses)
 	if err != nil {
-		s.Logger.Debugf("pin files: traverse chunks: %v, addr %s", err, addr)
-
 		if errors.Is(err, traversal.ErrInvalidType) {
 			s.Logger.Error("pin files: invalid type")
+
 			jsonhttp.BadRequest(w, "invalid type")
 			return
 		}
 
 		s.Logger.Error("pin files: cannot pin")
+
 		jsonhttp.InternalServerError(w, "cannot pin")
 		return
 	}
@@ -91,19 +89,10 @@ func (s *server) unpinFile(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	chunkAddressFn := s.unpinChunkAddressFn(ctx, addr)
-
-	err = s.Traversal.TraverseFileAddresses(ctx, addr, chunkAddressFn)
+	err = s.unpinRootAddress(ctx, addr)
 	if err != nil {
-		s.Logger.Debugf("pin files: traverse chunks: %v, addr %s", err, addr)
-
-		if errors.Is(err, traversal.ErrInvalidType) {
-			s.Logger.Error("pin files: invalid type")
-			jsonhttp.BadRequest(w, "invalid type")
-			return
-		}
-
 		s.Logger.Error("pin files: cannot unpin")
+
 		jsonhttp.InternalServerError(w, "cannot unpin")
 		return
 	}

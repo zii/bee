@@ -36,8 +36,8 @@ func (s *server) pinBytes(w http.ResponseWriter, r *http.Request) {
 	if !has {
 		_, err := s.Storer.Get(r.Context(), storage.ModeGetRequest, addr)
 		if err != nil {
-			s.Logger.Debugf("pin chunk: netstore get: %v", err)
-			s.Logger.Error("pin chunk: netstore")
+			s.Logger.Debugf("pin bytes: netstore get: %v", err)
+			s.Logger.Error("pin bytes: netstore")
 
 			jsonhttp.NotFound(w, nil)
 			return
@@ -46,19 +46,17 @@ func (s *server) pinBytes(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	chunkAddressFn := s.pinChunkAddressFn(ctx, addr)
-
-	err = s.Traversal.TraverseBytesAddresses(ctx, addr, chunkAddressFn)
+	err = s.pinRootAddress(ctx, addr, s.Traversal.TraverseBytesAddresses)
 	if err != nil {
-		s.Logger.Debugf("pin bytes: traverse chunks: %v, addr %s", err, addr)
-
 		if errors.Is(err, traversal.ErrInvalidType) {
 			s.Logger.Error("pin bytes: invalid type")
+
 			jsonhttp.BadRequest(w, "invalid type")
 			return
 		}
 
 		s.Logger.Error("pin bytes: cannot pin")
+
 		jsonhttp.InternalServerError(w, "cannot pin")
 		return
 	}
@@ -91,19 +89,10 @@ func (s *server) unpinBytes(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	chunkAddressFn := s.unpinChunkAddressFn(ctx, addr)
-
-	err = s.Traversal.TraverseBytesAddresses(ctx, addr, chunkAddressFn)
+	err = s.unpinRootAddress(ctx, addr)
 	if err != nil {
-		s.Logger.Debugf("pin bytes: traverse chunks: %v, addr %s", err, addr)
-
-		if errors.Is(err, traversal.ErrInvalidType) {
-			s.Logger.Error("pin bytes: invalid type")
-			jsonhttp.BadRequest(w, "invalid type")
-			return
-		}
-
 		s.Logger.Error("pin bytes: cannot unpin")
+
 		jsonhttp.InternalServerError(w, "cannot unpin")
 		return
 	}
