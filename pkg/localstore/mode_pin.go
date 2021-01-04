@@ -79,12 +79,16 @@ func (db *DB) pin(mode storage.ModePin, rootAddr, addr swarm.Address) (err error
 			return err
 		}
 	case storage.ModePinFoundAddress:
-		err := db.pinFoundAddress(batch, rootAddr, addr)
+		has, err := db.retrievalDataIndex.Has(addressToItem(addr))
 		if err != nil {
 			return err
 		}
-	case storage.ModePinAddressesCompleted:
-		err := db.pinAddressesCompleted(batch, rootAddr)
+
+		if !has {
+			return storage.ErrNotFound
+		}
+
+		err = db.pinFoundAddress(batch, rootAddr, addr)
 		if err != nil {
 			return err
 		}
@@ -98,7 +102,7 @@ func (db *DB) pin(mode storage.ModePin, rootAddr, addr swarm.Address) (err error
 		if err != nil {
 			return err
 		}
-	case storage.ModePinUnpinFoundAddress:
+	case storage.ModePinUnpinFoundAddresses:
 		err := db.pinUnpinFoundAddresses(rootAddr, addr)
 		if err != nil {
 			return err
@@ -127,7 +131,7 @@ func (db *DB) pinSingle(batch *leveldb.Batch, addr swarm.Address) (err error) {
 
 	if has {
 		// already pinned
-		return nil
+		return storage.ErrAlreadyPinned
 	}
 
 	// single chunk was not pinned previously
@@ -224,43 +228,59 @@ func (db *DB) pinStarted(batch *leveldb.Batch, rootAddr swarm.Address) (err erro
 		ParentAddress: rootAddr.Bytes(),
 	}
 
-	var exists bool
-
-	_, err = db.pinSecondaryIndex.Get(secondaryItem)
+	has, err := db.pinSecondaryIndex.Has(secondaryItem)
 	if err != nil {
-		if !errors.Is(err, leveldb.ErrNotFound) {
+		return err
+	}
+
+	if has {
+		// Get the existing pin counter of the chunk
+		secondaryPinnedItem, err := db.pinSecondaryIndex.Get(secondaryItem)
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return storage.ErrNotFound
+			}
+
+			return err
+		}
+
+		if secondaryPinnedItem.PinCounter == 1 {
+			return storage.ErrAlreadyPinned
+		}
+
+		return nil
+	}
+
+	// item was not pinned previously
+	secondaryItem.PinCounter = 0
+
+	err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
+	if err != nil {
+		return err
+	}
+
+	item := addressToItem(rootAddr)
+
+	// add to gcExcludeIndex
+	err = db.gcExcludeIndex.PutInBatch(batch, item)
+	if err != nil {
+		return err
+	}
+
+	pinnedItem, err := db.pinIndex.Get(item)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			item.PinCounter = 1
+		} else {
 			return err
 		}
 	} else {
-		exists = true
+		item.PinCounter = pinnedItem.PinCounter + 1
 	}
 
-	if !exists {
-		// item was not pinned previously
-		secondaryItem.PinCounter = 1
-
-		err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
-		if err != nil {
-			return err
-		}
-
-		item := addressToItem(rootAddr)
-
-		pinnedItem, err := db.pinIndex.Get(item)
-		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				item.PinCounter = 1
-			} else {
-				return err
-			}
-		} else {
-			item.PinCounter = pinnedItem.PinCounter + 1
-		}
-
-		err = db.pinIndex.PutInBatch(batch, item)
-		if err != nil {
-			return err
-		}
+	err = db.pinIndex.PutInBatch(batch, item)
+	if err != nil {
+		return err
 	}
 
 	return nil
@@ -270,6 +290,15 @@ func (db *DB) pinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (err er
 	secondaryItem := shed.Item{
 		Address:       rootAddr.Bytes(),
 		ParentAddress: rootAddr.Bytes(),
+	}
+
+	has, err := db.pinSecondaryIndex.Has(secondaryItem)
+	if err != nil {
+		return err
+	}
+
+	if !has {
+		return storage.ErrIsUnpinned
 	}
 
 	// Get the existing pin counter of the chunk
@@ -282,10 +311,12 @@ func (db *DB) pinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (err er
 		return err
 	}
 
-	if secondaryPinnedItem.PinCounter > 0 {
-		return fmt.Errorf("pinning cannot be completed: %s", rootAddr.String())
+	if secondaryPinnedItem.PinCounter == 1 {
+		// already pinned
+		return storage.ErrAlreadyPinned
 	}
 
+	// mark root address as pinned (in secondary index)
 	secondaryItem.PinCounter = 1
 
 	err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
@@ -297,6 +328,25 @@ func (db *DB) pinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (err er
 }
 
 func (db *DB) pinFoundAddress(batch *leveldb.Batch, rootAddr, addr swarm.Address) (err error) {
+	// skipping root address
+	if rootAddr.Equal(addr) {
+		return nil
+	}
+
+	rootSecondaryItem := shed.Item{
+		Address:       rootAddr.Bytes(),
+		ParentAddress: rootAddr.Bytes(),
+	}
+
+	has, err := db.pinSecondaryIndex.Has(rootSecondaryItem)
+	if err != nil {
+		return err
+	}
+
+	if !has {
+		return storage.ErrIsUnpinned
+	}
+
 	item := shed.Item{
 		Address:       addr.Bytes(),
 		ParentAddress: rootAddr.Bytes(),
@@ -328,81 +378,20 @@ func (db *DB) pinFoundAddress(batch *leveldb.Batch, rootAddr, addr swarm.Address
 		ParentAddress: addr.Bytes(),
 	}
 
-	has, err := db.pinSecondaryIndex.Has(reverseIndexItem)
+	reverseIndexItem.PinCounter = item.PinCounter
+
+	err = db.pinSecondaryIndex.PutInBatch(batch, reverseIndexItem)
 	if err != nil {
 		return err
 	}
 
-	if !has {
-		reverseIndexItem.PinCounter = 0
-
-		err = db.pinSecondaryIndex.PutInBatch(batch, reverseIndexItem)
-		if err != nil {
-			return err
-		}
+	// add to gcExcludeIndex
+	err = db.gcExcludeIndex.PutInBatch(batch, addressToItem(addr))
+	if err != nil {
+		return err
 	}
 
 	return nil
-}
-
-func (db *DB) pinAddressesCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (err error) {
-	err = db.pinSecondaryIndex.Iterate(func(item shed.Item) (stop bool, err error) {
-		_, err = db.retrievalDataIndex.Get(item)
-		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				return true, storage.ErrNotFound
-			}
-
-			return true, err
-		}
-
-		reverseIndexItem := shed.Item{
-			Address:       rootAddr.Bytes(),
-			ParentAddress: item.Address,
-		}
-
-		_, err = db.pinSecondaryIndex.Get(reverseIndexItem)
-		if err != nil {
-			// if missing maybe unpin was called before pin completed
-			if errors.Is(err, leveldb.ErrNotFound) {
-				return true, storage.ErrNotFound
-			}
-
-			return true, err
-		}
-
-		reverseIndexItem.PinCounter = item.PinCounter
-
-		err = db.pinSecondaryIndex.PutInBatch(batch, reverseIndexItem)
-		if err != nil {
-			return true, err
-		}
-
-		// add to gcExcludeIndex
-		err = db.gcExcludeIndex.PutInBatch(batch, item)
-		if err != nil {
-			return true, err
-		}
-
-		return false, nil
-	}, &shed.IterateOptions{
-		Prefix: rootAddr.Bytes(),
-	})
-
-	// mark root hash as completed
-	secondaryItem := shed.Item{
-		Address:       rootAddr.Bytes(),
-		ParentAddress: rootAddr.Bytes(),
-	}
-
-	secondaryItem.PinCounter = 0
-
-	err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
-	if err != nil {
-		return err
-	}
-
-	return err
 }
 
 func (db *DB) pinUnpinStarted(batch *leveldb.Batch, rootAddr swarm.Address) (err error) {
@@ -411,23 +400,16 @@ func (db *DB) pinUnpinStarted(batch *leveldb.Batch, rootAddr swarm.Address) (err
 		ParentAddress: rootAddr.Bytes(),
 	}
 
-	_, err = db.pinSecondaryIndex.Get(secondaryItem)
+	has, err := db.pinSecondaryIndex.Has(secondaryItem)
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return storage.ErrNotFound
+		return err
+	}
+
+	if has {
+		err = db.pinSecondaryIndex.DeleteInBatch(batch, secondaryItem)
+		if err != nil {
+			return err
 		}
-
-		return err
-	}
-
-	err = db.pinSecondaryIndex.DeleteInBatch(batch, secondaryItem)
-	if err != nil {
-		return err
-	}
-
-	err = db.gcExcludeIndex.DeleteInBatch(batch, secondaryItem)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -451,32 +433,39 @@ func (db *DB) pinUnpinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (e
 
 	item := addressToItem(rootAddr)
 
-	pinnedItem, err := db.pinIndex.Get(item)
+	has, err := db.pinIndex.Has(item)
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return storage.ErrNotFound
-		}
-
 		return err
 	}
 
-	if pinnedItem.PinCounter > 1 {
-		item.PinCounter = pinnedItem.PinCounter - 1
+	if has {
+		pinnedItem, err := db.pinIndex.Get(item)
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return storage.ErrNotFound
+			}
 
-		err = db.pinIndex.PutInBatch(batch, item)
-		if err != nil {
-			return err
-		}
-	} else {
-		err = db.pinIndex.DeleteInBatch(batch, item)
-		if err != nil {
 			return err
 		}
 
-		// remove from gcExcludeIndex
-		err = db.gcExcludeIndex.DeleteInBatch(batch, item)
-		if err != nil {
-			return err
+		if pinnedItem.PinCounter > 1 {
+			item.PinCounter = pinnedItem.PinCounter - 1
+
+			err = db.pinIndex.PutInBatch(batch, item)
+			if err != nil {
+				return err
+			}
+		} else {
+			err = db.pinIndex.DeleteInBatch(batch, item)
+			if err != nil {
+				return err
+			}
+
+			// remove from gcExcludeIndex
+			err = db.gcExcludeIndex.DeleteInBatch(batch, item)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

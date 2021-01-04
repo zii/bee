@@ -16,6 +16,8 @@ import (
 var (
 	ErrNotFound        = errors.New("storage: not found")
 	ErrInvalidChunk    = errors.New("storage: invalid chunk")
+	ErrAlreadyPinned   = errors.New("storage: already pinned")
+	ErrIsUnpinned      = errors.New("storage: is unpinned")
 	ErrReferenceLength = errors.New("invalid reference length")
 )
 
@@ -130,14 +132,12 @@ func (m ModePin) String() string {
 		return "PinCompleted"
 	case ModePinFoundAddress:
 		return "PinFoundAddress"
-	case ModePinAddressesCompleted:
-		return "PinAddressesCompleted"
 	case ModePinUnpinStarted:
 		return "PinUnpinStarted"
 	case ModePinUnpinCompleted:
 		return "PinUnpinCompleted"
-	case ModePinUnpinFoundAddress:
-		return "PinUnpinFoundAddress"
+	case ModePinUnpinFoundAddresses:
+		return "PinUnpinFoundAddresses"
 	default:
 		return "Unknown"
 	}
@@ -155,14 +155,12 @@ const (
 	ModePinCompleted
 	// ModePinFoundAddress: when pinning address for some root address
 	ModePinFoundAddress
-	// ModePinAddressesCompleted: when pinned all addresses for root address
-	ModePinAddressesCompleted
 	// ModePinUnpinStarted: when unpinning for root address has started
 	ModePinUnpinStarted
 	// ModePinUnpinCompleted: when unpinning for root address has completed
 	ModePinUnpinCompleted
-	// ModePinUnpinFoundAddress: when unpinning address for some root address
-	ModePinUnpinFoundAddress
+	// ModePinUnpinFoundAddresses: when unpinning address for some root address
+	ModePinUnpinFoundAddresses
 )
 
 // Descriptor holds information required for Pull syncing. This struct
