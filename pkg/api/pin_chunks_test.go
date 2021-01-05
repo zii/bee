@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"io/ioutil"
 	"net/http"
+	"sort"
 	"testing"
 
 	"github.com/ethersphere/bee/pkg/logging"
@@ -127,11 +128,11 @@ func TestPinChunkHandler(t *testing.T) {
 			}),
 		)
 
-		// Check is the chunk is pinned twice
+		// check that the chunk is still pinned just once
 		jsonhttptest.Request(t, client, http.MethodGet, "/pin/chunks/"+chunk.Address().String(), http.StatusOK,
 			jsonhttptest.WithExpectedJSONResponse(api.PinnedChunk{
 				Address:    chunk.Address(),
-				PinCounter: 2,
+				PinCounter: 1,
 			}),
 		)
 	})
@@ -145,25 +146,18 @@ func TestPinChunkHandler(t *testing.T) {
 			}),
 		)
 
-		// Check is the chunk is pinned once
-		jsonhttptest.Request(t, client, http.MethodGet, "/pin/chunks/"+chunk.Address().String(), http.StatusOK,
-			jsonhttptest.WithExpectedJSONResponse(api.PinnedChunk{
-				Address:    chunk.Address(),
-				PinCounter: 1,
+		// check is the chunk is not pinned anymore
+		jsonhttptest.Request(t, client, http.MethodGet, "/pin/chunks/"+chunk.Address().String(), http.StatusNotFound,
+			jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
+				Message: http.StatusText(http.StatusNotFound),
+				Code:    http.StatusNotFound,
 			}),
 		)
 	})
 
 	// unpin a chunk second time
 	t.Run("unpin-chunk-2", func(t *testing.T) {
-		jsonhttptest.Request(t, client, http.MethodDelete, "/pin/chunks/"+chunk.Address().String(), http.StatusOK,
-			jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
-				Message: http.StatusText(http.StatusOK),
-				Code:    http.StatusOK,
-			}),
-		)
-
-		// Check if the chunk is removed from the pinIndex
+		// chunk should already have been removed from the pinIndex
 		jsonhttptest.Request(t, client, http.MethodGet, "/pin/chunks/"+chunk.Address().String(), http.StatusNotFound,
 			jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
 				Message: http.StatusText(http.StatusNotFound),
@@ -206,20 +200,32 @@ func TestPinChunkHandler(t *testing.T) {
 			}),
 		)
 
+		hashes := []string{chunk.Address().String(), chunk2.Address().String()}
+		sort.Strings(hashes)
+
+		var resp api.ListPinnedChunksResponse
+
 		jsonhttptest.Request(t, client, http.MethodGet, "/pin/chunks", http.StatusOK,
-			jsonhttptest.WithExpectedJSONResponse(api.ListPinnedChunksResponse{
-				Chunks: []api.PinnedChunk{
-					{
-						Address:    chunk.Address(),
-						PinCounter: 1,
-					},
-					{
-						Address:    chunk2.Address(),
-						PinCounter: 1,
-					},
-				},
-			}),
+			jsonhttptest.WithUnmarshalJSONResponse(&resp),
 		)
+
+		if len(hashes) != len(resp.Chunks) {
+			t.Fatalf("expected to find %d pinned chunks, got %d", len(hashes), len(resp.Chunks))
+		}
+
+		respChunksHashes := make([]string, 0)
+
+		for _, rc := range resp.Chunks {
+			respChunksHashes = append(respChunksHashes, rc.Address.String())
+		}
+
+		sort.Strings(respChunksHashes)
+
+		for i, h := range hashes {
+			if h != respChunksHashes[i] {
+				t.Fatalf("expected to find %s address, found %s", h, respChunksHashes[i])
+			}
+		}
 	})
 
 }

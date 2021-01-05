@@ -6,10 +6,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io/ioutil"
-	"math"
 	"net/http"
 	"strconv"
 
@@ -34,6 +31,11 @@ func (s *server) pinChunk(w http.ResponseWriter, r *http.Request) {
 
 	err = s.Storer.Set(r.Context(), storage.ModeSetPin, addr)
 	if err != nil {
+		if errors.Is(err, storage.ErrAlreadyPinned) {
+			jsonhttp.OK(w, nil)
+			return
+		}
+
 		if errors.Is(err, storage.ErrNotFound) {
 			ch, err := s.Storer.Get(r.Context(), storage.ModeGetRequest, addr)
 			if err != nil {
@@ -98,6 +100,11 @@ func (s *server) unpinChunk(w http.ResponseWriter, r *http.Request) {
 
 	err = s.Storer.Pin(r.Context(), storage.ModePinUnpinSingle, addr)
 	if err != nil {
+		if errors.Is(storage.ErrNotFound, err) {
+			jsonhttp.NotFound(w, nil)
+			return
+		}
+
 		s.Logger.Debugf("pin chunk: unpinning error: %v, addr %s", err, addr)
 		s.Logger.Error("pin chunk: unpin")
 		jsonhttp.InternalServerError(w, "cannot unpin chunk")

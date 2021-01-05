@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/ethersphere/bee/pkg/storage"
@@ -21,6 +23,7 @@ type MockStorer struct {
 	modePut         map[string]storage.ModePut
 	modeSet         map[string]storage.ModeSet
 	pinIndex        map[string]uint64
+	pinSecondIndex  map[string]uint64
 	subpull         []storage.Descriptor
 	partialInterval bool
 	morePull        chan struct{}
@@ -53,13 +56,14 @@ func WithPartialInterval(v bool) Option {
 
 func NewStorer(opts ...Option) *MockStorer {
 	s := &MockStorer{
-		store:    make(map[string][]byte),
-		modePut:  make(map[string]storage.ModePut),
-		modeSet:  make(map[string]storage.ModeSet),
-		pinIndex: make(map[string]uint64),
-		morePull: make(chan struct{}),
-		quit:     make(chan struct{}),
-		bins:     make([]uint64, swarm.MaxBins),
+		store:          make(map[string][]byte),
+		modePut:        make(map[string]storage.ModePut),
+		modeSet:        make(map[string]storage.ModeSet),
+		pinIndex:       make(map[string]uint64),
+		pinSecondIndex: make(map[string]uint64),
+		morePull:       make(chan struct{}),
+		quit:           make(chan struct{}),
+		bins:           make([]uint64, swarm.MaxBins),
 	}
 
 	for _, v := range opts {
@@ -135,6 +139,7 @@ func (m *MockStorer) HasMulti(ctx context.Context, addrs ...swarm.Address) (yes 
 func (m *MockStorer) Set(ctx context.Context, mode storage.ModeSet, addrs ...swarm.Address) (err error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
+
 	for _, addr := range addrs {
 		m.modeSet[addr.String()] = mode
 		switch mode {
@@ -149,25 +154,14 @@ func (m *MockStorer) Set(ctx context.Context, mode storage.ModeSet, addrs ...swa
 				return storage.ErrNotFound
 			}
 
-			// if mode is set pin, increment the pin counter
-			addrString := addr.String()
-			if count, ok := m.pinIndex[addrString]; ok {
-				m.pinIndex[addrString] = count + 1
-			} else {
-				m.pinIndex[addrString] = uint64(1)
+			err = m.pinSingle(addr)
+			if err != nil {
+				return err
 			}
 		case storage.ModeSetUnpin:
-			// if mode is set unpin, decrement the pin counter and remove the address
-			// once it reaches zero
-			addrString := addr.String()
-			if count, ok := m.pinIndex[addrString]; ok {
-				updatedCount := count - 1
-
-				if updatedCount == 0 {
-					delete(m.pinIndex, addrString)
-				} else {
-					m.pinIndex[addrString] = updatedCount
-				}
+			err = m.pinUnpinSingle(addr)
+			if err != nil {
+				return err
 			}
 		case storage.ModeSetRemove:
 			delete(m.store, addr.String())
@@ -270,8 +264,288 @@ func (m *MockStorer) SubscribePush(ctx context.Context) (c <-chan swarm.Chunk, s
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, rootAddr, addr swarm.Address) (err error) {
-	panic("not implemented") // TODO: Implement
+func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, addr swarm.Address) (err error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	rootAddr, hasRootAddr := ctx.Value(storage.PinRootAddressContextKey{}).(swarm.Address)
+	if !hasRootAddr {
+		switch mode {
+		case storage.ModePinSingle, storage.ModePinUnpinSingle:
+			rootAddr = swarm.ZeroAddress
+		case storage.ModePinStarted, storage.ModePinCompleted, storage.ModePinFoundAddress:
+			fallthrough
+		case storage.ModePinUnpinStarted, storage.ModePinUnpinCompleted, storage.ModePinUnpinFoundAddresses:
+			return fmt.Errorf("root address missing")
+		}
+	}
+
+	switch mode {
+	case storage.ModePinSingle:
+		err = m.pinSingle(addr)
+		if err != nil {
+			return err
+		}
+
+	case storage.ModePinUnpinSingle:
+		err = m.pinUnpinSingle(addr)
+		if err != nil {
+			return err
+		}
+
+	case storage.ModePinStarted:
+		secondaryKey := make([]byte, len(rootAddr.Bytes())*2)
+		copy(secondaryKey[:len(rootAddr.Bytes())], rootAddr.Bytes())
+		copy(secondaryKey[len(rootAddr.Bytes()):], rootAddr.Bytes())
+
+		secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+		if count, ok := m.pinSecondIndex[secondaryAddrString]; ok {
+			if count == 1 {
+				return storage.ErrAlreadyPinned
+			}
+
+			return nil
+		}
+
+		m.pinSecondIndex[secondaryAddrString] = 0
+
+	case storage.ModePinCompleted:
+		rootAddrString := rootAddr.String()
+
+		// check root secondary value
+		secondaryKey := make([]byte, len(rootAddr.Bytes())*2)
+		copy(secondaryKey[:len(rootAddr.Bytes())], rootAddr.Bytes())
+		copy(secondaryKey[len(rootAddr.Bytes()):], rootAddr.Bytes())
+
+		secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+		count, ok := m.pinSecondIndex[secondaryAddrString]
+		if !ok {
+			return storage.ErrIsUnpinned
+		}
+
+		if count == 1 {
+			return storage.ErrAlreadyPinned
+		}
+
+		// update pin count for addresses from root
+		for addrString := range m.pinSecondIndex {
+			if !strings.HasPrefix(addrString, rootAddrString) {
+				continue
+			}
+
+			keyLen := len(addrString) / 2
+			parent := addrString[:keyLen]
+			actual := addrString[keyLen:]
+
+			reverseAddrString := actual + parent
+
+			count, ok := m.pinSecondIndex[reverseAddrString]
+			if !ok {
+				return storage.ErrNotFound
+			}
+
+			m.pinSecondIndex[addrString] = count
+		}
+
+		// update root secondary value
+		m.pinSecondIndex[secondaryAddrString] = 1
+
+		// all done now
+		if count, ok := m.pinIndex[rootAddrString]; ok {
+			m.pinIndex[rootAddrString] = count + 1
+		} else {
+			m.pinIndex[rootAddrString] = 1
+		}
+
+	case storage.ModePinFoundAddress:
+		if rootAddr.Equal(addr) {
+			return nil
+		}
+
+		rootSecondaryKey := make([]byte, len(rootAddr.Bytes())*2)
+		copy(rootSecondaryKey[:len(rootAddr.Bytes())], rootAddr.Bytes())
+		copy(rootSecondaryKey[len(rootAddr.Bytes()):], rootAddr.Bytes())
+
+		rootSecondaryAddrString := swarm.NewAddress(rootSecondaryKey).String()
+
+		if _, ok := m.pinSecondIndex[rootSecondaryAddrString]; !ok {
+			return storage.ErrIsUnpinned
+		}
+
+		// update reverse index
+		reverseSecondaryKey := make([]byte, len(rootAddr.Bytes())*2)
+		copy(reverseSecondaryKey[:len(rootAddr.Bytes())], addr.Bytes())
+		copy(reverseSecondaryKey[len(rootAddr.Bytes()):], rootAddr.Bytes())
+
+		reverseSecondaryAddrString := swarm.NewAddress(reverseSecondaryKey).String()
+
+		if count, ok := m.pinSecondIndex[reverseSecondaryAddrString]; ok {
+			m.pinSecondIndex[reverseSecondaryAddrString] = count + 1
+		} else {
+			m.pinSecondIndex[reverseSecondaryAddrString] = 1
+		}
+
+		// update address chunk count
+		addrString := addr.String()
+		if count, ok := m.pinIndex[addrString]; ok {
+			m.pinIndex[addrString] = count + 1
+		} else {
+			m.pinIndex[addrString] = 1
+		}
+
+		secondaryKey := make([]byte, len(rootAddr.Bytes())*2)
+		copy(secondaryKey[:len(rootAddr.Bytes())], rootAddr.Bytes())
+		copy(secondaryKey[len(rootAddr.Bytes()):], addr.Bytes())
+
+		secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+		if _, ok := m.pinSecondIndex[secondaryAddrString]; !ok {
+			m.pinSecondIndex[secondaryAddrString] = 0
+		}
+
+	case storage.ModePinUnpinStarted:
+		// remove root secondary key
+		secondaryKey := make([]byte, len(rootAddr.Bytes())*2)
+		copy(secondaryKey[:len(rootAddr.Bytes())], rootAddr.Bytes())
+		copy(secondaryKey[len(rootAddr.Bytes()):], rootAddr.Bytes())
+
+		secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+		delete(m.pinSecondIndex, secondaryAddrString)
+
+	case storage.ModePinUnpinCompleted:
+		rootAddrString := rootAddr.String()
+
+		var rootHasRelatedAddresses bool
+
+		for addrString := range m.pinSecondIndex {
+			if strings.HasPrefix(addrString, rootAddrString) {
+				rootHasRelatedAddresses = true
+				break
+			}
+		}
+
+		if rootHasRelatedAddresses {
+			return fmt.Errorf("unpinning cannot be completed: %s", rootAddr.String())
+		}
+
+		if count, ok := m.pinIndex[rootAddrString]; ok {
+			updatedCount := count - 1
+
+			if updatedCount == 0 {
+				delete(m.pinIndex, rootAddrString)
+			} else {
+				m.pinIndex[rootAddrString] = updatedCount
+			}
+		}
+
+	case storage.ModePinUnpinFoundAddresses:
+		rootAddrString := rootAddr.String()
+
+		// remove from reverse lookup first
+		for addrString := range m.pinSecondIndex {
+			if !strings.HasPrefix(addrString, rootAddrString) {
+				continue
+			}
+
+			keyLen := len(addrString) / 2
+			parent := addrString[:keyLen]
+			actual := addrString[keyLen:]
+
+			reverseAddrString := actual + parent
+
+			count, ok := m.pinSecondIndex[reverseAddrString]
+			if !ok {
+				continue
+			}
+
+			delete(m.pinSecondIndex, reverseAddrString)
+
+			// remove from main pin index
+			if pinCount, ok := m.pinIndex[actual]; ok {
+				if count > pinCount {
+					return fmt.Errorf("reverse address pin count: %d more than expected: %d", count, pinCount)
+				}
+
+				updatedCount := pinCount - count
+
+				if updatedCount == 0 {
+					delete(m.pinIndex, actual)
+				} else {
+					m.pinIndex[actual] = updatedCount
+				}
+			}
+		}
+
+		// remove found addresses
+		removeAddr := make([]string, 0)
+
+		for addrString := range m.pinSecondIndex {
+			if !strings.HasPrefix(addrString, rootAddrString) {
+				continue
+			}
+
+			removeAddr = append(removeAddr, addrString)
+		}
+
+		for _, addrString := range removeAddr {
+			delete(m.pinSecondIndex, addrString)
+		}
+
+	default:
+	}
+
+	return nil
+}
+
+func (m *MockStorer) pinSingle(addr swarm.Address) error {
+	secondaryKey := make([]byte, len(addr.Bytes())*2)
+	copy(secondaryKey[:len(addr.Bytes())], addr.Bytes())
+
+	secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+	if _, ok := m.pinSecondIndex[secondaryAddrString]; ok {
+		return storage.ErrAlreadyPinned
+	}
+
+	m.pinSecondIndex[secondaryAddrString] = 1
+
+	addrString := addr.String()
+	if count, ok := m.pinIndex[addrString]; ok {
+		m.pinIndex[addrString] = count + 1
+	} else {
+		m.pinIndex[addrString] = 1
+	}
+
+	return nil
+}
+
+func (m *MockStorer) pinUnpinSingle(addr swarm.Address) error {
+	secondaryKey := make([]byte, len(addr.Bytes())*2)
+	copy(secondaryKey[:len(addr.Bytes())], addr.Bytes())
+
+	secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+	if _, ok := m.pinSecondIndex[secondaryAddrString]; !ok {
+		return storage.ErrNotFound
+	}
+
+	delete(m.pinSecondIndex, secondaryAddrString)
+
+	addrString := addr.String()
+	if count, ok := m.pinIndex[addrString]; ok {
+		updatedCount := count - 1
+
+		if updatedCount == 0 {
+			delete(m.pinIndex, addrString)
+		} else {
+			m.pinIndex[addrString] = updatedCount
+		}
+	}
+
+	return nil
 }
 
 func (m *MockStorer) PinnedChunks(ctx context.Context, offset, cursor int) (pinnedChunks []*storage.Pinner, err error) {
