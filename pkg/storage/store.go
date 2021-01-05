@@ -117,6 +117,9 @@ const (
 	ModeSetUnpin
 )
 
+// PinRootAddressContextKey is used to reference a root address as context value.
+type PinRootAddressContextKey struct{}
+
 // ModePin enumerates different Pinning modes.
 type ModePin int
 
@@ -214,7 +217,7 @@ type Hasser interface {
 }
 
 type Pinning interface {
-	Pin(ctx context.Context, mode ModePin, rootAddr, addr swarm.Address) (err error)
+	Pin(ctx context.Context, mode ModePin, addr swarm.Address) (err error)
 	PinnedChunks(ctx context.Context, offset, limit int) (pinnedChunks []*Pinner, err error)
 	PinCounter(address swarm.Address) (uint64, error)
 }

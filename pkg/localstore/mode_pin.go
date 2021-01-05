@@ -18,11 +18,11 @@ import (
 )
 
 // Pin updates database indexes for chunks when performing pinning.
-func (db *DB) Pin(ctx context.Context, mode storage.ModePin, rootAddr, addr swarm.Address) (err error) {
+func (db *DB) Pin(ctx context.Context, mode storage.ModePin, addr swarm.Address) (err error) {
 	db.metrics.ModePin.Inc()
 	defer totalTimeMetric(db.metrics.TotalTimePin, time.Now())
 
-	err = db.pin(mode, rootAddr, addr)
+	err = db.pin(ctx, mode, addr)
 	if err != nil {
 		db.metrics.ModePinFailure.Inc()
 	}
@@ -32,10 +32,22 @@ func (db *DB) Pin(ctx context.Context, mode storage.ModePin, rootAddr, addr swar
 // pin updates database indexes for chunks represented by provided addresses.
 // It acquires lockAddr to protect two calls
 // of this function for the same address in parallel.
-func (db *DB) pin(mode storage.ModePin, rootAddr, addr swarm.Address) (err error) {
+func (db *DB) pin(ctx context.Context, mode storage.ModePin, addr swarm.Address) (err error) {
 	// protect parallel updates
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
+
+	rootAddr, hasRootAddr := ctx.Value(storage.PinRootAddressContextKey{}).(swarm.Address)
+	if !hasRootAddr {
+		switch mode {
+		case storage.ModePinSingle, storage.ModePinUnpinSingle:
+			rootAddr = swarm.ZeroAddress
+		case storage.ModePinStarted, storage.ModePinCompleted, storage.ModePinFoundAddress:
+			fallthrough
+		case storage.ModePinUnpinStarted, storage.ModePinUnpinCompleted, storage.ModePinUnpinFoundAddresses:
+			return fmt.Errorf("root address missing")
+		}
+	}
 
 	batch := new(leveldb.Batch)
 

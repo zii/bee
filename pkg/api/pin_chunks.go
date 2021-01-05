@@ -96,7 +96,7 @@ func (s *server) unpinChunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.Storer.Set(r.Context(), storage.ModeSetUnpin, addr)
+	err = s.Storer.Pin(r.Context(), storage.ModePinUnpinSingle, addr)
 	if err != nil {
 		s.Logger.Debugf("pin chunk: unpinning error: %v, addr %s", err, addr)
 		s.Logger.Error("pin chunk: unpin")
@@ -329,7 +329,7 @@ func (s *server) pinTraverseAddressesFn(ctx context.Context, reference swarm.Add
 			return err
 		}
 
-		err = s.Storer.Pin(ctx, storage.ModePinFoundAddress, reference, address)
+		err = s.Storer.Pin(ctx, storage.ModePinFoundAddress, address)
 		if err != nil {
 			s.Logger.Debugf("pin traversal: storer pin found address: for reference %s, address %s: %w", reference, address, err)
 			return err
@@ -344,8 +344,10 @@ func (s *server) pinRootAddress(
 	addr swarm.Address,
 	traverseFn func(context.Context, swarm.Address, swarm.AddressIterFunc) error,
 ) error {
+	// set root address
+	ctx = context.WithValue(ctx, storage.PinRootAddressContextKey{}, addr)
 
-	err := s.Storer.Pin(ctx, storage.ModePinStarted, addr, swarm.ZeroAddress)
+	err := s.Storer.Pin(ctx, storage.ModePinStarted, swarm.ZeroAddress)
 	if err != nil {
 		s.Logger.Debugf("pin: pinning start error: %v, addr %s", err, addr)
 
@@ -364,7 +366,7 @@ func (s *server) pinRootAddress(
 
 		if errors.Is(err, storage.ErrIsUnpinned) {
 			// call unpin for addresses
-			if err := s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, addr, swarm.ZeroAddress); err != nil {
+			if err := s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, swarm.ZeroAddress); err != nil {
 				s.Logger.Debugf("pin: traverse chunks: unpinning found addresses: %v, addr %s", err, addr)
 				return err
 			}
@@ -373,7 +375,7 @@ func (s *server) pinRootAddress(
 		return err
 	}
 
-	err = s.Storer.Pin(ctx, storage.ModePinCompleted, addr, swarm.ZeroAddress)
+	err = s.Storer.Pin(ctx, storage.ModePinCompleted, swarm.ZeroAddress)
 	if err != nil {
 		s.Logger.Debugf("pin: pinning complete error: %v, addr %s", err, addr)
 
@@ -388,20 +390,22 @@ func (s *server) pinRootAddress(
 }
 
 func (s *server) unpinRootAddress(ctx context.Context, addr swarm.Address) error {
+	// set root address
+	ctx = context.WithValue(ctx, storage.PinRootAddressContextKey{}, addr)
 
-	err := s.Storer.Pin(ctx, storage.ModePinUnpinStarted, addr, swarm.ZeroAddress)
+	err := s.Storer.Pin(ctx, storage.ModePinUnpinStarted, swarm.ZeroAddress)
 	if err != nil {
 		s.Logger.Debugf("pin: unpinning start error: %v, addr %s", err, addr)
 		return err
 	}
 
-	err = s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, addr, swarm.ZeroAddress)
+	err = s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, swarm.ZeroAddress)
 	if err != nil {
 		s.Logger.Debugf("pin: unpinning found addresses error: %v, addr %s", err, addr)
 		return err
 	}
 
-	err = s.Storer.Pin(ctx, storage.ModePinUnpinCompleted, addr, swarm.ZeroAddress)
+	err = s.Storer.Pin(ctx, storage.ModePinUnpinCompleted, swarm.ZeroAddress)
 	if err != nil {
 		s.Logger.Debugf("pin: unpinning complete error: %v, addr %s", err, addr)
 		return err

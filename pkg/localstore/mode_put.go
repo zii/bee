@@ -36,7 +36,7 @@ func (db *DB) Put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 	db.metrics.ModePut.Inc()
 	defer totalTimeMetric(db.metrics.TotalTimePut, time.Now())
 
-	exist, err = db.put(mode, chs...)
+	exist, err = db.put(ctx, mode, chs...)
 	if err != nil {
 		db.metrics.ModePutFailure.Inc()
 	}
@@ -51,7 +51,7 @@ func (db *DB) Put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 // and following ones will have exist set to true for their index in exist
 // slice. This is the same behaviour as if the same chunks are passed one by one
 // in multiple put method calls.
-func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err error) {
+func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err error) {
 	// protect parallel updates
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
@@ -72,6 +72,8 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 	// Values from this map are stored with the batch
 	binIDs := make(map[uint8]uint64)
 
+	rootAddr, hasRootAddr := ctx.Value(storage.PinRootAddressContextKey{}).(swarm.Address)
+
 	switch mode {
 	case storage.ModePutRequest, storage.ModePutRequestPin:
 		for i, ch := range chs {
@@ -87,9 +89,16 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 			gcSizeChange += c
 
 			if mode == storage.ModePutRequestPin {
-				err = db.setPin(batch, ch.Address())
-				if err != nil {
-					return nil, err
+				if hasRootAddr {
+					err = db.pinFoundAddress(batch, rootAddr, ch.Address())
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					err = db.pinSingle(batch, ch.Address())
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
@@ -112,10 +121,18 @@ func (db *DB) put(mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err e
 				triggerPushFeed = true
 			}
 			gcSizeChange += c
+
 			if mode == storage.ModePutUploadPin {
-				err = db.setPin(batch, ch.Address())
-				if err != nil {
-					return nil, err
+				if hasRootAddr {
+					err = db.pinFoundAddress(batch, rootAddr, ch.Address())
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					err = db.pinSingle(batch, ch.Address())
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
