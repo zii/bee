@@ -222,46 +222,4 @@ func TestPinChunkHandler(t *testing.T) {
 		)
 	})
 
-	t.Run("update-pin-counter-up", func(t *testing.T) {
-		updatePinCounter := api.UpdatePinCounter{
-			PinCounter: 7,
-		}
-
-		jsonhttptest.Request(t, client, http.MethodPut, "/pin/chunks/"+chunk.Address().String(), http.StatusOK,
-			jsonhttptest.WithJSONRequestBody(updatePinCounter),
-			jsonhttptest.WithExpectedJSONResponse(api.PinnedChunk{
-				Address:    chunk.Address(),
-				PinCounter: updatePinCounter.PinCounter,
-			}),
-		)
-
-		jsonhttptest.Request(t, client, http.MethodGet, "/pin/chunks/"+chunk.Address().String(), http.StatusOK,
-			jsonhttptest.WithExpectedJSONResponse(api.PinnedChunk{
-				Address:    chunk.Address(),
-				PinCounter: updatePinCounter.PinCounter,
-			}),
-		)
-	})
-
-	t.Run("update-pin-counter-to-zero", func(t *testing.T) {
-		updatePinCounter := api.UpdatePinCounter{
-			PinCounter: 0,
-		}
-
-		jsonhttptest.Request(t, client, http.MethodPut, "/pin/chunks/"+chunk.Address().String(), http.StatusOK,
-			jsonhttptest.WithJSONRequestBody(updatePinCounter),
-			jsonhttptest.WithExpectedJSONResponse(api.PinnedChunk{
-				Address:    chunk.Address(),
-				PinCounter: updatePinCounter.PinCounter,
-			}),
-		)
-
-		jsonhttptest.Request(t, client, http.MethodGet, "/pin/chunks/"+chunk.Address().String(), http.StatusNotFound,
-			jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
-				Message: http.StatusText(http.StatusNotFound),
-				Code:    http.StatusNotFound,
-			}),
-		)
-	})
-
 }
