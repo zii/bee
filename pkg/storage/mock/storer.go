@@ -6,6 +6,7 @@ package mock
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"sync"
 
@@ -19,8 +20,7 @@ type MockStorer struct {
 	store           map[string][]byte
 	modePut         map[string]storage.ModePut
 	modeSet         map[string]storage.ModeSet
-	pinnedAddress   []swarm.Address // Stores the pinned address
-	pinnedCounter   []uint64        // and its respective counter. These are stored as slices to preserve the order.
+	pinIndex        map[string]uint64
 	subpull         []storage.Descriptor
 	partialInterval bool
 	morePull        chan struct{}
@@ -56,6 +56,7 @@ func NewStorer(opts ...Option) *MockStorer {
 		store:    make(map[string][]byte),
 		modePut:  make(map[string]storage.ModePut),
 		modeSet:  make(map[string]storage.ModeSet),
+		pinIndex: make(map[string]uint64),
 		morePull: make(chan struct{}),
 		quit:     make(chan struct{}),
 		bins:     make([]uint64, swarm.MaxBins),
@@ -100,17 +101,11 @@ func (m *MockStorer) Put(ctx context.Context, mode storage.ModePut, chs ...swarm
 		switch mode {
 		case storage.ModePutUploadPin:
 			// if mode is set pin, increment the pin counter
-			var found bool
-			addr := ch.Address()
-			for i, ad := range m.pinnedAddress {
-				if addr.String() == ad.String() {
-					m.pinnedCounter[i] = m.pinnedCounter[i] + 1
-					found = true
-				}
-			}
-			if !found {
-				m.pinnedAddress = append(m.pinnedAddress, addr)
-				m.pinnedCounter = append(m.pinnedCounter, uint64(1))
+			addrString := ch.Address().String()
+			if count, ok := m.pinIndex[addrString]; ok {
+				m.pinIndex[addrString] = count + 1
+			} else {
+				m.pinIndex[addrString] = uint64(1)
 			}
 		default:
 		}
@@ -155,32 +150,23 @@ func (m *MockStorer) Set(ctx context.Context, mode storage.ModeSet, addrs ...swa
 			}
 
 			// if mode is set pin, increment the pin counter
-			var found bool
-			for i, ad := range m.pinnedAddress {
-				if addr.String() == ad.String() {
-					m.pinnedCounter[i] = m.pinnedCounter[i] + 1
-					found = true
-				}
-			}
-			if !found {
-				m.pinnedAddress = append(m.pinnedAddress, addr)
-				m.pinnedCounter = append(m.pinnedCounter, uint64(1))
+			addrString := addr.String()
+			if count, ok := m.pinIndex[addrString]; ok {
+				m.pinIndex[addrString] = count + 1
+			} else {
+				m.pinIndex[addrString] = uint64(1)
 			}
 		case storage.ModeSetUnpin:
 			// if mode is set unpin, decrement the pin counter and remove the address
 			// once it reaches zero
-			for i, ad := range m.pinnedAddress {
-				if addr.String() == ad.String() {
-					m.pinnedCounter[i] = m.pinnedCounter[i] - 1
-					if m.pinnedCounter[i] == 0 {
-						copy(m.pinnedAddress[i:], m.pinnedAddress[i+1:])
-						m.pinnedAddress[len(m.pinnedAddress)-1] = swarm.NewAddress([]byte{0})
-						m.pinnedAddress = m.pinnedAddress[:len(m.pinnedAddress)-1]
+			addrString := addr.String()
+			if count, ok := m.pinIndex[addrString]; ok {
+				updatedCount := count - 1
 
-						copy(m.pinnedCounter[i:], m.pinnedCounter[i+1:])
-						m.pinnedCounter[len(m.pinnedCounter)-1] = uint64(0)
-						m.pinnedCounter = m.pinnedCounter[:len(m.pinnedCounter)-1]
-					}
+				if updatedCount == 0 {
+					delete(m.pinIndex, addrString)
+				} else {
+					m.pinIndex[addrString] = updatedCount
 				}
 			}
 		case storage.ModeSetRemove:
@@ -291,30 +277,35 @@ func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, rootAddr, ad
 func (m *MockStorer) PinnedChunks(ctx context.Context, offset, cursor int) (pinnedChunks []*storage.Pinner, err error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	if len(m.pinnedAddress) == 0 {
+
+	if len(m.pinIndex) == 0 {
 		return pinnedChunks, nil
 	}
-	for i, addr := range m.pinnedAddress {
+
+	for addrString, count := range m.pinIndex {
+		addrBytes, _ := hex.DecodeString(addrString)
 		pi := &storage.Pinner{
-			Address:    swarm.NewAddress(addr.Bytes()),
-			PinCounter: m.pinnedCounter[i],
+			Address:    swarm.NewAddress(addrBytes),
+			PinCounter: count,
 		}
 		pinnedChunks = append(pinnedChunks, pi)
 	}
+
 	if pinnedChunks == nil {
 		return pinnedChunks, errors.New("pin chunks: leveldb: not found")
 	}
+
 	return pinnedChunks, nil
 }
 
 func (m *MockStorer) PinCounter(address swarm.Address) (uint64, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	for i, addr := range m.pinnedAddress {
-		if addr.String() == address.String() {
-			return m.pinnedCounter[i], nil
-		}
+
+	if count, ok := m.pinIndex[address.String()]; ok {
+		return count, nil
 	}
+
 	return 0, storage.ErrNotFound
 }
 
