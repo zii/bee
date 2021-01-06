@@ -454,7 +454,7 @@ func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, addr swarm.A
 				m.pinSecondIndex[reverseAddrString] = count
 			} else {
 				if pinCount, ok := m.pinIndex[calculatedRootAddrString]; ok {
-					m.pinIndex[calculatedRootAddrString] = pinCount - 1
+					m.pinIndex[calculatedRootAddrString] = pinCount - count
 				} else {
 					m.pinIndex[calculatedRootAddrString] = 1
 				}
@@ -521,6 +521,22 @@ func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, addr swarm.A
 			}
 
 			reverseAddrString := actual + parent
+
+			if count, ok := m.pinSecondIndex[reverseAddrString]; ok {
+				if pinCount, ok := m.pinIndex[actual]; ok {
+					if count > pinCount {
+						return fmt.Errorf("reverse address pin count: %d more than expected: %d", count, pinCount)
+					}
+
+					updatedCount := pinCount - count
+
+					if updatedCount == 0 {
+						delete(m.pinIndex, addrString)
+					} else {
+						m.pinIndex[addrString] = updatedCount
+					}
+				}
+			}
 
 			removeAddr = append(removeAddr, addrString)
 			removeAddr = append(removeAddr, reverseAddrString)
