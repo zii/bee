@@ -35,6 +35,20 @@ func (s *server) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 	// Add the tag to the context
 	ctx := sctx.SetTag(r.Context(), tag)
 
+	isPinning := requestPin(r)
+
+	if isPinning {
+		// NOTE: updating context here
+		ctx, err = s.pinUploadingStart(ctx, requestEncrypt(r))
+		if err != nil {
+			s.Logger.Error("bytes upload: cannot pin")
+			jsonhttp.InternalServerError(w, nil)
+			return
+		}
+
+		defer s.pinUploadingCleanup(ctx)
+	}
+
 	pipe := builder.NewPipelineBuilder(ctx, s.Storer, requestModePut(r), requestEncrypt(r))
 	address, err := builder.FeedPipeline(ctx, pipe, r.Body, r.ContentLength)
 	if err != nil {
@@ -52,6 +66,16 @@ func (s *server) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	if isPinning {
+		err := s.pinUploadingComplete(ctx, address)
+		if err != nil {
+			s.Logger.Error("bytes upload: cannot pin")
+			jsonhttp.InternalServerError(w, nil)
+			return
+		}
+	}
+
 	w.Header().Set(SwarmTagUidHeader, fmt.Sprint(tag.Uid))
 	w.Header().Set("Access-Control-Expose-Headers", SwarmTagUidHeader)
 	jsonhttp.OK(w, bytesPostResponse{

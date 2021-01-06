@@ -6,6 +6,7 @@ package api
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ethersphere/bee/pkg/encryption"
 	"github.com/ethersphere/bee/pkg/file/pipeline/builder"
 	"github.com/ethersphere/bee/pkg/logging"
 	m "github.com/ethersphere/bee/pkg/metrics"
@@ -182,6 +184,10 @@ func requestModePut(r *http.Request) storage.ModePut {
 	return storage.ModePutUpload
 }
 
+func requestPin(r *http.Request) bool {
+	return strings.ToLower(r.Header.Get(SwarmPinHeader)) == "true"
+}
+
 func requestEncrypt(r *http.Request) bool {
 	return strings.ToLower(r.Header.Get(SwarmEncryptHeader)) == "true"
 }
@@ -267,5 +273,52 @@ func requestPipelineFn(s storage.Storer, r *http.Request) pipelineFunc {
 	return func(ctx context.Context, r io.Reader, l int64) (swarm.Address, error) {
 		pipe := builder.NewPipelineBuilder(ctx, s, mode, encrypt)
 		return builder.FeedPipeline(ctx, pipe, r, l)
+	}
+}
+
+func (s *server) pinUploadingStart(ctx context.Context, encrypt bool) (context.Context, error) {
+	// create uploading address
+	var b []byte
+	if encrypt {
+		b = make([]byte, encryption.ReferenceSize)
+	} else {
+		b = make([]byte, swarm.SectionSize)
+	}
+	binary.LittleEndian.PutUint64(b[len(b)-8:], uint64(time.Now().UnixNano()))
+	randomRootAddr := swarm.NewAddress(b)
+
+	// set root address
+	ctx = context.WithValue(ctx, storage.PinRootAddressContextKey{}, randomRootAddr)
+
+	err := s.Storer.Pin(ctx, storage.ModePinUploadingStarted, swarm.ZeroAddress)
+	if err != nil {
+		s.Logger.Debugf("pin upload: pinning start error: %v, addr %s", err, randomRootAddr)
+
+		return ctx, err
+	}
+
+	return ctx, nil
+}
+
+func (s *server) pinUploadingComplete(ctx context.Context, addr swarm.Address) error {
+	err := s.Storer.Pin(ctx, storage.ModePinUploadingCompleted, addr)
+	if err != nil {
+		s.Logger.Debugf("pin upload: pinning complete error: %v, addr %s", err, addr)
+
+		return err
+	}
+
+	return nil
+}
+
+func (s *server) pinUploadingCleanup(ctx context.Context) {
+	err := s.Storer.Pin(ctx, storage.ModePinUploadingCleanup, swarm.ZeroAddress)
+	if err != nil {
+		rootAddr, hasRootAddr := ctx.Value(storage.PinRootAddressContextKey{}).(swarm.Address)
+		if !hasRootAddr {
+			rootAddr = swarm.ZeroAddress
+		}
+
+		s.Logger.Warningf("pin upload: pinning cleanup error: %v, addr %s", err, rootAddr)
 	}
 }

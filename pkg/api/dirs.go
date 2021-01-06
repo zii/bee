@@ -61,6 +61,21 @@ func (s *server) dirUploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Add the tag to the context
 	ctx := sctx.SetTag(r.Context(), tag)
+
+	isPinning := requestPin(r)
+
+	if isPinning {
+		// NOTE: updating context here
+		ctx, err = s.pinUploadingStart(ctx, requestEncrypt(r))
+		if err != nil {
+			s.Logger.Error("dir upload: cannot pin")
+			jsonhttp.InternalServerError(w, nil)
+			return
+		}
+
+		defer s.pinUploadingCleanup(ctx)
+	}
+
 	p := requestPipelineFn(s.Storer, r)
 	encrypt := requestEncrypt(r)
 	l := loadsave.New(s.Storer, requestModePut(r), encrypt)
@@ -80,6 +95,16 @@ func (s *server) dirUploadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	if isPinning {
+		err := s.pinUploadingComplete(ctx, reference)
+		if err != nil {
+			s.Logger.Error("dir upload: cannot pin")
+			jsonhttp.InternalServerError(w, nil)
+			return
+		}
+	}
+
 	w.Header().Set(SwarmTagUidHeader, fmt.Sprint(tag.Uid))
 	jsonhttp.OK(w, fileUploadResponse{
 		Reference: reference,

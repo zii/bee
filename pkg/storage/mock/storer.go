@@ -405,6 +405,134 @@ func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, addr swarm.A
 			m.pinSecondIndex[secondaryAddrString] = 0
 		}
 
+	case storage.ModePinUploadingStarted:
+		secondaryKey := make([]byte, len(rootAddr.Bytes())*2)
+		copy(secondaryKey[:len(rootAddr.Bytes())], rootAddr.Bytes())
+		copy(secondaryKey[len(rootAddr.Bytes()):], rootAddr.Bytes())
+
+		secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+		if _, ok := m.pinSecondIndex[secondaryAddrString]; ok {
+			return storage.ErrAlreadyPinned
+		}
+
+		m.pinSecondIndex[secondaryAddrString] = 0
+
+	case storage.ModePinUploadingCompleted:
+		rootAddrString := rootAddr.String()
+		calculatedRootAddrString := addr.String() // this is calculated root chunk after upload
+
+		// migrate from random root hash to actual one
+		for addrString := range m.pinSecondIndex {
+			if !strings.HasPrefix(addrString, rootAddrString) {
+				continue
+			}
+
+			keyLen := len(addrString) / 2
+			parent := addrString[:keyLen]
+			actual := addrString[keyLen:]
+
+			// skipping root address
+			if parent == actual {
+				continue
+			}
+
+			reverseRandomAddrString := actual + parent
+
+			count, ok := m.pinSecondIndex[reverseRandomAddrString]
+			if !ok {
+				return storage.ErrNotFound
+			}
+
+			secondaryAddrString := calculatedRootAddrString + actual
+			reverseAddrString := actual + calculatedRootAddrString
+
+			// only put secondary entries if not already exists
+
+			if _, ok := m.pinSecondIndex[secondaryAddrString]; !ok {
+				m.pinSecondIndex[secondaryAddrString] = count
+				m.pinSecondIndex[reverseAddrString] = count
+			} else {
+				if pinCount, ok := m.pinIndex[calculatedRootAddrString]; ok {
+					m.pinIndex[calculatedRootAddrString] = pinCount - 1
+				} else {
+					m.pinIndex[calculatedRootAddrString] = 1
+				}
+			}
+		}
+
+		// remove random root addresses
+		removeAddr := make([]string, 0)
+
+		for addrString := range m.pinSecondIndex {
+			if !strings.HasPrefix(addrString, rootAddrString) {
+				continue
+			}
+
+			keyLen := len(addrString) / 2
+			parent := addrString[:keyLen]
+			actual := addrString[keyLen:]
+
+			// skipping root address
+			if parent == actual {
+				continue
+			}
+
+			reverseAddrString := actual + parent
+
+			removeAddr = append(removeAddr, addrString)
+			removeAddr = append(removeAddr, reverseAddrString)
+		}
+
+		// remove main random root address
+		removeAddr = append(removeAddr, rootAddrString+rootAddrString)
+
+		for _, addrString := range removeAddr {
+			delete(m.pinSecondIndex, addrString)
+		}
+
+		// create entry for actual root address
+		secondaryKey := make([]byte, len(addr.Bytes())*2)
+		copy(secondaryKey[:len(addr.Bytes())], addr.Bytes())
+		copy(secondaryKey[len(addr.Bytes()):], addr.Bytes())
+
+		secondaryAddrString := swarm.NewAddress(secondaryKey).String()
+
+		m.pinSecondIndex[secondaryAddrString] = 1
+
+	case storage.ModePinUploadingCleanup:
+		rootAddrString := rootAddr.String()
+
+		// remove random root addresses
+		removeAddr := make([]string, 0)
+
+		for addrString := range m.pinSecondIndex {
+			if !strings.HasPrefix(addrString, rootAddrString) {
+				continue
+			}
+
+			keyLen := len(addrString) / 2
+			parent := addrString[:keyLen]
+			actual := addrString[keyLen:]
+
+			// skipping root address
+			if parent == actual {
+				continue
+			}
+
+			reverseAddrString := actual + parent
+
+			removeAddr = append(removeAddr, addrString)
+			removeAddr = append(removeAddr, reverseAddrString)
+		}
+
+		// remove main random root address
+		removeAddr = append(removeAddr, rootAddrString+rootAddrString)
+
+		for _, addrString := range removeAddr {
+			delete(m.pinSecondIndex, addrString)
+		}
+
 	case storage.ModePinUnpinStarted:
 		// remove root secondary key
 		secondaryKey := make([]byte, len(rootAddr.Bytes())*2)

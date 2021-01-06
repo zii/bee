@@ -150,6 +150,20 @@ func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		reader = tmp
 	}
 
+	isPinning := requestPin(r)
+
+	if isPinning {
+		// NOTE: updating context here
+		ctx, err = s.pinUploadingStart(ctx, requestEncrypt(r))
+		if err != nil {
+			s.Logger.Error("file upload: cannot pin")
+			jsonhttp.InternalServerError(w, nil)
+			return
+		}
+
+		defer s.pinUploadingCleanup(ctx)
+	}
+
 	p := requestPipelineFn(s.Storer, r)
 
 	// first store the file and get its reference
@@ -209,6 +223,16 @@ func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	if isPinning {
+		err := s.pinUploadingComplete(ctx, reference)
+		if err != nil {
+			s.Logger.Error("file upload: cannot pin")
+			jsonhttp.InternalServerError(w, nil)
+			return
+		}
+	}
+
 	w.Header().Set("ETag", fmt.Sprintf("%q", reference.String()))
 	w.Header().Set(SwarmTagUidHeader, fmt.Sprint(tag.Uid))
 	w.Header().Set("Access-Control-Expose-Headers", SwarmTagUidHeader)

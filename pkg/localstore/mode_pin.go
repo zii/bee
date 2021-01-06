@@ -5,6 +5,7 @@
 package localstore
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -101,6 +102,21 @@ func (db *DB) pin(ctx context.Context, mode storage.ModePin, addr swarm.Address)
 		}
 
 		err = db.pinFoundAddress(batch, rootAddr, addr)
+		if err != nil {
+			return err
+		}
+	case storage.ModePinUploadingStarted:
+		err := db.pinUploadingStarted(batch, rootAddr)
+		if err != nil {
+			return err
+		}
+	case storage.ModePinUploadingCompleted:
+		err := db.pinUploadingCompleted(batch, rootAddr, addr)
+		if err != nil {
+			return err
+		}
+	case storage.ModePinUploadingCleanup:
+		err := db.pinUploadingCleanup(batch, rootAddr)
 		if err != nil {
 			return err
 		}
@@ -450,6 +466,213 @@ func (db *DB) pinFoundAddress(batch *leveldb.Batch, rootAddr, addr swarm.Address
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (db *DB) pinUploadingStarted(batch *leveldb.Batch, randomRootAddr swarm.Address) (err error) {
+	secondaryItem := shed.Item{
+		Address:       randomRootAddr.Bytes(),
+		ParentAddress: randomRootAddr.Bytes(),
+	}
+
+	has, err := db.pinSecondaryIndex.Has(secondaryItem)
+	if err != nil {
+		return err
+	}
+
+	if has {
+		// highly unlikely
+		return storage.ErrAlreadyPinned
+	}
+
+	// item was not pinned previously
+	secondaryItem.PinCounter = 0
+
+	err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (db *DB) pinUploadingCompleted(batch *leveldb.Batch, randomRootAddr, rootAddr swarm.Address) (err error) {
+	secondaryRandomItem := shed.Item{
+		Address:       randomRootAddr.Bytes(),
+		ParentAddress: randomRootAddr.Bytes(),
+	}
+
+	has, err := db.pinSecondaryIndex.Has(secondaryRandomItem)
+	if err != nil {
+		return err
+	}
+
+	if !has {
+		return storage.ErrIsUnpinned
+	}
+
+	// migrate from random root hash to actual one
+	err = db.pinSecondaryIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+		// skipping root address
+		if bytes.Equal(item.ParentAddress, item.Address) {
+			return false, nil
+		}
+
+		reverseRandomItem := shed.Item{
+			Address:       item.ParentAddress,
+			ParentAddress: item.Address,
+		}
+
+		reverseRandomPinnedItem, err := db.pinSecondaryIndex.Get(reverseRandomItem)
+		if err != nil {
+			return true, err
+		}
+
+		secondaryItem := shed.Item{
+			Address:       item.Address,
+			ParentAddress: rootAddr.Bytes(),
+		}
+		reverseItem := shed.Item{
+			Address:       rootAddr.Bytes(),
+			ParentAddress: item.Address,
+		}
+
+		secondaryItem.PinCounter = reverseRandomPinnedItem.PinCounter
+		reverseItem.PinCounter = reverseRandomPinnedItem.PinCounter
+
+		// only put secondary entries if not already exists
+
+		hasSecondary, err := db.pinSecondaryIndex.Has(secondaryItem)
+		if err != nil {
+			return true, err
+		}
+
+		if !hasSecondary {
+			err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
+			if err != nil {
+				return true, err
+			}
+
+			err = db.pinSecondaryIndex.PutInBatch(batch, reverseItem)
+			if err != nil {
+				return true, err
+			}
+		} else {
+			item := shed.Item{
+				Address: item.Address,
+			}
+
+			pinnedItem, err := db.pinIndex.Get(item)
+			if err != nil {
+				if errors.Is(err, leveldb.ErrNotFound) {
+					return true, storage.ErrNotFound
+				}
+
+				return true, err
+			}
+
+			// pin counter must be > 2 in this case
+
+			item.PinCounter = pinnedItem.PinCounter - 1
+
+			err = db.pinIndex.PutInBatch(batch, item)
+			if err != nil {
+				return true, err
+			}
+		}
+
+		// remove random root addresses
+		err = db.pinSecondaryIndex.DeleteInBatch(batch, item)
+		if err != nil {
+			return true, err
+		}
+
+		err = db.pinSecondaryIndex.DeleteInBatch(batch, reverseRandomItem)
+		if err != nil {
+			return true, err
+		}
+
+		return false, nil
+	}, &shed.IterateOptions{
+		Prefix: randomRootAddr.Bytes(),
+	})
+	if err != nil {
+		return err
+	}
+
+	// remove main random root address
+	err = db.pinSecondaryIndex.DeleteInBatch(batch, secondaryRandomItem)
+	if err != nil {
+		return err
+	}
+
+	// create entry for actual root address
+	secondaryItem := shed.Item{
+		Address:       rootAddr.Bytes(),
+		ParentAddress: rootAddr.Bytes(),
+	}
+
+	secondaryItem.PinCounter = 1
+
+	err = db.pinSecondaryIndex.PutInBatch(batch, secondaryItem)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (db *DB) pinUploadingCleanup(batch *leveldb.Batch, randomRootAddr swarm.Address) (err error) {
+	secondaryRandomItem := shed.Item{
+		Address:       randomRootAddr.Bytes(),
+		ParentAddress: randomRootAddr.Bytes(),
+	}
+
+	has, err := db.pinSecondaryIndex.Has(secondaryRandomItem)
+	if err != nil {
+		return err
+	}
+
+	if !has {
+		return nil
+	}
+
+	// remove random root addresses
+	err = db.pinSecondaryIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+		// skipping root address
+		if bytes.Equal(item.ParentAddress, item.Address) {
+			return false, nil
+		}
+
+		reverseRandomItem := shed.Item{
+			Address:       item.ParentAddress,
+			ParentAddress: item.Address,
+		}
+
+		err = db.pinSecondaryIndex.DeleteInBatch(batch, item)
+		if err != nil {
+			return true, err
+		}
+
+		err = db.pinSecondaryIndex.DeleteInBatch(batch, reverseRandomItem)
+		if err != nil {
+			return true, err
+		}
+
+		return false, nil
+	}, &shed.IterateOptions{
+		Prefix: randomRootAddr.Bytes(),
+	})
+	if err != nil {
+		return err
+	}
+
+	// remove main random root address
+	err = db.pinSecondaryIndex.DeleteInBatch(batch, secondaryRandomItem)
+	if err != nil {
+		return err
 	}
 
 	return nil

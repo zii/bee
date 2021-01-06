@@ -135,6 +135,12 @@ func (m ModePin) String() string {
 		return "PinCompleted"
 	case ModePinFoundAddress:
 		return "PinFoundAddress"
+	case ModePinUploadingStarted:
+		return "PinUploadingStarted"
+	case ModePinUploadingCompleted:
+		return "PinUploadingCompleted"
+	case ModePinUploadingCleanup:
+		return "PinUploadingCleanup"
 	case ModePinUnpinStarted:
 		return "PinUnpinStarted"
 	case ModePinUnpinCompleted:
@@ -158,6 +164,12 @@ const (
 	ModePinCompleted
 	// ModePinFoundAddress: when pinning address for some root address
 	ModePinFoundAddress
+	// ModePinUploadingStarted: when pinning for uploading content is started
+	ModePinUploadingStarted
+	// ModePinUploadingCompleted: when pinning for uploading content is completed
+	ModePinUploadingCompleted
+	// ModePinUploadingCleanup: cleanup any remains when pinning for uploading content fails
+	ModePinUploadingCleanup
 	// ModePinUnpinStarted: when unpinning for root address has started
 	ModePinUnpinStarted
 	// ModePinUnpinCompleted: when unpinning for root address has completed
