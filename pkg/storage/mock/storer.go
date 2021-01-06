@@ -275,7 +275,7 @@ func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, addr swarm.A
 			rootAddr = swarm.ZeroAddress
 		case storage.ModePinStarted, storage.ModePinCompleted, storage.ModePinFoundAddress:
 			fallthrough
-		case storage.ModePinUnpinStarted, storage.ModePinUnpinCompleted, storage.ModePinUnpinFoundAddresses:
+		case storage.ModePinUnpinStarted, storage.ModePinUnpinCompleted, storage.ModePinUnpinFoundAddress:
 			return fmt.Errorf("root address missing")
 		}
 	}
@@ -569,57 +569,38 @@ func (m *MockStorer) Pin(ctx context.Context, mode storage.ModePin, addr swarm.A
 			}
 		}
 
-	case storage.ModePinUnpinFoundAddresses:
+	case storage.ModePinUnpinFoundAddress:
+		if rootAddr.Equal(addr) {
+			return nil
+		}
+
 		rootAddrString := rootAddr.String()
+		addrString := addr.String()
 
-		// remove from reverse lookup first
-		for addrString := range m.pinSecondIndex {
-			if !strings.HasPrefix(addrString, rootAddrString) {
-				continue
-			}
+		reverseSecondaryAddrString := addrString + rootAddrString
+		secondaryAddrString := rootAddrString + addrString
 
-			keyLen := len(addrString) / 2
-			parent := addrString[:keyLen]
-			actual := addrString[keyLen:]
-
-			reverseAddrString := actual + parent
-
-			count, ok := m.pinSecondIndex[reverseAddrString]
-			if !ok {
-				continue
-			}
-
-			delete(m.pinSecondIndex, reverseAddrString)
-
-			// remove from main pin index
-			if pinCount, ok := m.pinIndex[actual]; ok {
-				if count > pinCount {
-					return fmt.Errorf("reverse address pin count: %d more than expected: %d", count, pinCount)
-				}
-
-				updatedCount := pinCount - count
-
-				if updatedCount == 0 {
-					delete(m.pinIndex, actual)
-				} else {
-					m.pinIndex[actual] = updatedCount
-				}
-			}
+		count, ok := m.pinSecondIndex[reverseSecondaryAddrString]
+		if !ok {
+			return nil
 		}
 
-		// remove found addresses
-		removeAddr := make([]string, 0)
+		delete(m.pinSecondIndex, reverseSecondaryAddrString)
+		delete(m.pinSecondIndex, secondaryAddrString)
 
-		for addrString := range m.pinSecondIndex {
-			if !strings.HasPrefix(addrString, rootAddrString) {
-				continue
+		// remove from main pin index
+		if pinCount, ok := m.pinIndex[addrString]; ok {
+			if count > pinCount {
+				return fmt.Errorf("reverse address pin count: %d more than expected: %d", count, pinCount)
 			}
 
-			removeAddr = append(removeAddr, addrString)
-		}
+			updatedCount := pinCount - count
 
-		for _, addrString := range removeAddr {
-			delete(m.pinSecondIndex, addrString)
+			if updatedCount == 0 {
+				delete(m.pinIndex, addrString)
+			} else {
+				m.pinIndex[addrString] = updatedCount
+			}
 		}
 
 	default:

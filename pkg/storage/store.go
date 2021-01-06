@@ -145,8 +145,8 @@ func (m ModePin) String() string {
 		return "PinUnpinStarted"
 	case ModePinUnpinCompleted:
 		return "PinUnpinCompleted"
-	case ModePinUnpinFoundAddresses:
-		return "PinUnpinFoundAddresses"
+	case ModePinUnpinFoundAddress:
+		return "PinUnpinFoundAddress"
 	default:
 		return "Unknown"
 	}
@@ -174,8 +174,8 @@ const (
 	ModePinUnpinStarted
 	// ModePinUnpinCompleted: when unpinning for root address has completed
 	ModePinUnpinCompleted
-	// ModePinUnpinFoundAddresses: when unpinning address for some root address
-	ModePinUnpinFoundAddresses
+	// ModePinUnpinFoundAddress: when unpinning address for some root address
+	ModePinUnpinFoundAddress
 )
 
 // Descriptor holds information required for Pull syncing. This struct

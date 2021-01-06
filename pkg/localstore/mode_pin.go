@@ -45,7 +45,7 @@ func (db *DB) pin(ctx context.Context, mode storage.ModePin, addr swarm.Address)
 			rootAddr = swarm.ZeroAddress
 		case storage.ModePinStarted, storage.ModePinCompleted, storage.ModePinFoundAddress:
 			fallthrough
-		case storage.ModePinUnpinStarted, storage.ModePinUnpinCompleted, storage.ModePinUnpinFoundAddresses:
+		case storage.ModePinUnpinStarted, storage.ModePinUnpinCompleted, storage.ModePinUnpinFoundAddress:
 			return fmt.Errorf("root address missing")
 		}
 	}
@@ -130,8 +130,8 @@ func (db *DB) pin(ctx context.Context, mode storage.ModePin, addr swarm.Address)
 		if err != nil {
 			return err
 		}
-	case storage.ModePinUnpinFoundAddresses:
-		err := db.pinUnpinFoundAddresses(rootAddr, addr)
+	case storage.ModePinUnpinFoundAddress:
+		err := db.pinUnpinFoundAddress(batch, rootAddr, addr)
 		if err != nil {
 			return err
 		}
@@ -700,21 +700,6 @@ func (db *DB) pinUnpinStarted(batch *leveldb.Batch, rootAddr swarm.Address) (err
 }
 
 func (db *DB) pinUnpinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (err error) {
-	var rootHasRelatedAddresses bool
-
-	_, err = db.pinSecondaryIndex.First(rootAddr.Bytes())
-	if err != nil {
-		if !errors.Is(err, leveldb.ErrNotFound) {
-			return err
-		}
-	} else {
-		rootHasRelatedAddresses = true
-	}
-
-	if rootHasRelatedAddresses {
-		return fmt.Errorf("unpinning cannot be completed: %s", rootAddr.String())
-	}
-
 	item := addressToItem(rootAddr)
 
 	has, err := db.pinIndex.Has(item)
@@ -756,34 +741,51 @@ func (db *DB) pinUnpinCompleted(batch *leveldb.Batch, rootAddr swarm.Address) (e
 	return nil
 }
 
-func (db *DB) pinUnpinFoundAddresses(rootAddr, addr swarm.Address) (err error) {
-	batch := new(leveldb.Batch)
+func (db *DB) pinUnpinFoundAddress(batch *leveldb.Batch, rootAddr, addr swarm.Address) (err error) {
+	// skipping root address
+	if rootAddr.Equal(addr) {
+		return nil
+	}
 
-	// remove from reverse lookup first
-	err = db.pinSecondaryIndex.Iterate(func(item shed.Item) (stop bool, err error) {
-		reverseItem := shed.Item{
-			Address:       item.ParentAddress,
-			ParentAddress: item.Address,
+	reverseIndexItem := shed.Item{
+		Address:       rootAddr.Bytes(),
+		ParentAddress: addr.Bytes(),
 		}
 
-		reversePinnedItem, err := db.pinSecondaryIndex.Get(reverseItem)
+	reversePinnedItem, err := db.pinSecondaryIndex.Get(reverseIndexItem)
 		if err != nil {
-			return true, err
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil
+		} else {
+			return err
+		}
 		}
 
-		err = db.pinSecondaryIndex.DeleteInBatch(batch, reverseItem)
+	err = db.pinSecondaryIndex.DeleteInBatch(batch, reverseIndexItem)
 		if err != nil {
-			return true, err
+		return err
+	}
+
+	secondaryItem := shed.Item{
+		Address:       addr.Bytes(),
+		ParentAddress: rootAddr.Bytes(),
+	}
+
+	err = db.pinSecondaryIndex.DeleteInBatch(batch, secondaryItem)
+	if err != nil {
+		return err
 		}
 
 		// remove from main pin index
+	item := addressToItem(addr)
+
 		pinnedItem, err := db.pinIndex.Get(item)
 		if err != nil {
 			if errors.Is(err, leveldb.ErrNotFound) {
-				return false, nil
+			return storage.ErrNotFound
 			}
 
-			return true, err
+		return err
 		}
 
 		pinnedItem.PinCounter -= reversePinnedItem.PinCounter
@@ -791,54 +793,19 @@ func (db *DB) pinUnpinFoundAddresses(rootAddr, addr swarm.Address) (err error) {
 		if pinnedItem.PinCounter > 0 {
 			err = db.pinIndex.PutInBatch(batch, pinnedItem)
 			if err != nil {
-				return true, err
+			return err
 			}
 		} else {
 			err = db.pinIndex.DeleteInBatch(batch, pinnedItem)
 			if err != nil {
-				return true, err
+			return err
 			}
 
 			// remove from gcExcludeIndex
 			err = db.gcExcludeIndex.DeleteInBatch(batch, pinnedItem)
 			if err != nil {
-				return true, err
-			}
-		}
-
-		return false, nil
-	}, &shed.IterateOptions{
-		Prefix: rootAddr.Bytes(),
-	})
-	if err != nil {
 		return err
 	}
-
-	err = db.shed.WriteBatch(batch)
-	if err != nil {
-		return err
-	}
-
-	batch = new(leveldb.Batch)
-
-	// remove found addresses
-	err = db.pinSecondaryIndex.Iterate(func(item shed.Item) (stop bool, err error) {
-		err = db.pinSecondaryIndex.DeleteInBatch(batch, item)
-		if err != nil {
-			return true, err
-		}
-
-		return false, nil
-	}, &shed.IterateOptions{
-		Prefix: rootAddr.Bytes(),
-	})
-	if err != nil {
-		return err
-	}
-
-	err = db.shed.WriteBatch(batch)
-	if err != nil {
-		return err
 	}
 
 	return nil

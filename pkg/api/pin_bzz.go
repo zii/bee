@@ -89,7 +89,7 @@ func (s *server) unpinBzz(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	err = s.unpinRootAddress(ctx, addr)
+	err = s.unpinRootAddress(ctx, addr, s.Traversal.TraverseManifestAddresses)
 	if err != nil {
 		s.Logger.Error("pin bzz: cannot unpin")
 

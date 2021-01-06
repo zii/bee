@@ -223,6 +223,18 @@ func (s *server) pinTraverseAddressesFn(ctx context.Context, reference swarm.Add
 	}
 }
 
+func (s *server) pinUnpinTraverseAddressesFn(ctx context.Context, reference swarm.Address) func(address swarm.Address) error {
+	return func(address swarm.Address) error {
+		err := s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddress, address)
+		if err != nil {
+			s.Logger.Debugf("pin traversal: storer unpin found address: for reference %s, address %s: %w", reference, address, err)
+			return err
+		}
+
+		return nil
+	}
+}
+
 func (s *server) pinRootAddress(
 	ctx context.Context,
 	addr swarm.Address,
@@ -247,15 +259,6 @@ func (s *server) pinRootAddress(
 	err = traverseFn(ctx, addr, chunkAddressFn)
 	if err != nil {
 		s.Logger.Debugf("pin: traverse chunks: %v, addr %s", err, addr)
-
-		if errors.Is(err, storage.ErrIsUnpinned) {
-			// call unpin for addresses
-			if err := s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, swarm.ZeroAddress); err != nil {
-				s.Logger.Debugf("pin: traverse chunks: unpinning found addresses: %v, addr %s", err, addr)
-				return err
-			}
-		}
-
 		return err
 	}
 
@@ -273,7 +276,11 @@ func (s *server) pinRootAddress(
 	return nil
 }
 
-func (s *server) unpinRootAddress(ctx context.Context, addr swarm.Address) error {
+func (s *server) unpinRootAddress(
+	ctx context.Context,
+	addr swarm.Address,
+	traverseFn func(context.Context, swarm.Address, swarm.AddressIterFunc) error,
+) error {
 	// set root address
 	ctx = context.WithValue(ctx, storage.PinRootAddressContextKey{}, addr)
 
@@ -283,9 +290,11 @@ func (s *server) unpinRootAddress(ctx context.Context, addr swarm.Address) error
 		return err
 	}
 
-	err = s.Storer.Pin(ctx, storage.ModePinUnpinFoundAddresses, swarm.ZeroAddress)
+	chunkAddressFn := s.pinUnpinTraverseAddressesFn(ctx, addr)
+
+	err = traverseFn(ctx, addr, chunkAddressFn)
 	if err != nil {
-		s.Logger.Debugf("pin: unpinning found addresses error: %v, addr %s", err, addr)
+		s.Logger.Debugf("pin: traverse chunks: %v, addr %s", err, addr)
 		return err
 	}
 

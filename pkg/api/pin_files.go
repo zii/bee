@@ -89,7 +89,7 @@ func (s *server) unpinFile(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	err = s.unpinRootAddress(ctx, addr)
+	err = s.unpinRootAddress(ctx, addr, s.Traversal.TraverseFileAddresses)
 	if err != nil {
 		s.Logger.Error("pin files: cannot unpin")
 

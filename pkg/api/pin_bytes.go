@@ -89,7 +89,7 @@ func (s *server) unpinBytes(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	err = s.unpinRootAddress(ctx, addr)
+	err = s.unpinRootAddress(ctx, addr, s.Traversal.TraverseBytesAddresses)
 	if err != nil {
 		s.Logger.Error("pin bytes: cannot unpin")
 
