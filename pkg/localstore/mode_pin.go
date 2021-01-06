@@ -788,7 +788,7 @@ func (db *DB) pinUnpinFoundAddresses(rootAddr, addr swarm.Address) (err error) {
 
 		pinnedItem.PinCounter -= reversePinnedItem.PinCounter
 
-		if pinnedItem.PinCounter > 1 {
+		if pinnedItem.PinCounter > 0 {
 			err = db.pinIndex.PutInBatch(batch, pinnedItem)
 			if err != nil {
 				return true, err
