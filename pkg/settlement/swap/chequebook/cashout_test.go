@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -17,11 +18,41 @@ import (
 	"github.com/ethersphere/bee/pkg/settlement/swap/chequebook"
 	chequestoremock "github.com/ethersphere/bee/pkg/settlement/swap/chequestore/mock"
 	"github.com/ethersphere/bee/pkg/settlement/swap/transaction"
-	"github.com/ethersphere/bee/pkg/settlement/swap/transaction/backendmock"
 	transactionmock "github.com/ethersphere/bee/pkg/settlement/swap/transaction/mock"
 	storemock "github.com/ethersphere/bee/pkg/statestore/mock"
 	"github.com/ethersphere/sw3-bindings/v2/simpleswapfactory"
 )
+
+/*
+
+	TestStart
+	TestCashCheque (success, still pending, not increasing)
+	TestCashoutStatus (with pending, without pending, no prior)
+
+*/
+
+func newCashoutService(
+	simpleSwapBinding chequebook.SimpleSwapBinding,
+	backend transaction.Backend,
+	transactionService transaction.Service,
+	chequeStore chequebook.ChequeStore,
+) (chequebook.CashoutService, error) {
+	store := storemock.NewStateStore()
+	cashoutService, err := chequebook.NewCashoutService(
+		logging.New(ioutil.Discard, 0),
+		store,
+		func(common.Address, bind.ContractBackend) (chequebook.SimpleSwapBinding, error) {
+			return simpleSwapBinding, nil
+		},
+		backend,
+		transactionService,
+		chequeStore,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return cashoutService, nil
+}
 
 func TestCashout(t *testing.T) {
 	chequebookAddress := common.HexToAddress("abcd")
@@ -40,7 +71,127 @@ func TestCashout(t *testing.T) {
 		Signature: []byte{},
 	}
 
-	store := storemock.NewStateStore()
+	receiptC := make(chan *types.Receipt, 1)
+
+	cashoutService, err := newCashoutService(
+		&simpleSwapBindingMock{
+			parseChequeCashed: func(l types.Log) (*simpleswapfactory.ERC20SimpleSwapChequeCashed, error) {
+				if l.Topics[0] != log1Topic {
+					t.Fatalf("parsing wrong log. wanted %v, got %v", log1Topic, l.Topics[0])
+				}
+				return &simpleswapfactory.ERC20SimpleSwapChequeCashed{
+					Beneficiary:      cheque.Beneficiary,
+					Recipient:        recipientAddress,
+					Caller:           cheque.Beneficiary,
+					TotalPayout:      totalPayout,
+					CumulativePayout: cumulativePayout,
+					CallerPayout:     big.NewInt(0),
+				}, nil
+			},
+		},
+		nil,
+		transactionmock.New(
+			transactionmock.WithSendFunc(func(c context.Context, request *transaction.TxRequest) (common.Hash, error) {
+				if request.To != chequebookAddress {
+					t.Fatalf("sending to wrong contract. wanted %x, got %x", chequebookAddress, request.To)
+				}
+				if request.Value.Cmp(big.NewInt(0)) != 0 {
+					t.Fatal("sending ether to chequebook contract")
+				}
+				return txHash, nil
+			}),
+			transactionmock.WithWatchForReceiptFunc(func(ctx context.Context, txHash common.Hash) (chan *types.Receipt, chan error) {
+				return receiptC, nil
+			}),
+		),
+		chequestoremock.NewChequeStore(
+			chequestoremock.WithLastChequeFunc(func(c common.Address) (*chequebook.SignedCheque, error) {
+				if c != chequebookAddress {
+					t.Fatalf("using wrong chequebook. wanted %x, got %x", chequebookAddress, c)
+				}
+				return cheque, nil
+			}),
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cashoutService.Close()
+
+	returnedTxHash, err := cashoutService.CashCheque(context.Background(), chequebookAddress, recipientAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if returnedTxHash != txHash {
+		t.Fatalf("returned wrong transaction hash. wanted %x, got %x", txHash, returnedTxHash)
+	}
+
+	status, err := cashoutService.CashoutStatus(context.Background(), chequebookAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if status.Reverted {
+		t.Fatal("reported reverted transaction")
+	}
+
+	if status.PendingTxHash != returnedTxHash {
+		t.Fatalf("wrong pending transaction hash. wanted %x, got %x", returnedTxHash, status.PendingTxHash)
+	}
+
+	if !status.PendingCheque.Equal(cheque) {
+		t.Fatalf("wrong pending cheque in status. wanted %v, got %v", cheque, status.PendingCheque)
+	}
+
+	if !status.Cheque.Equal(&chequebook.SignedCheque{}) {
+		t.Fatalf("wrong cheque in status. wanted %v, got %v", cheque, status.Cheque)
+	}
+
+	if status.Result != nil {
+		t.Fatal("unexpected result")
+	}
+
+	receiptC <- &types.Receipt{
+		Status: types.ReceiptStatusSuccessful,
+		Logs: []*types.Log{
+			{
+				Address: chequebookAddress,
+				Topics:  []common.Hash{log1Topic},
+			},
+		},
+	}
+
+	status, err = cashoutService.CashoutStatus(context.Background(), chequebookAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	if status.Reverted {
+		t.Fatal("reported reverted transaction")
+	}
+
+	if status.PendingTxHash != returnedTxHash {
+		t.Fatalf("wrong pending transaction hash. wanted %x, got %x", returnedTxHash, status.PendingTxHash)
+	}
+
+	if !status.PendingCheque.Equal(cheque) {
+		t.Fatalf("wrong pending cheque in status. wanted %v, got %v", cheque, status.PendingCheque)
+	}
+
+	if !status.Cheque.Equal(&chequebook.SignedCheque{}) {
+		t.Fatalf("wrong cheque in status. wanted %v, got %v", cheque, status.Cheque)
+	}
+
+	if status.Result != nil {
+		t.Fatal("unexpected result")
+	}
+}
+
+/*
+func TestCashout(t *testing.T) {
 	cashoutService, err := chequebook.NewCashoutService(
 		logging.New(ioutil.Discard, 0),
 		store,
@@ -81,48 +232,9 @@ func TestCashout(t *testing.T) {
 					},
 				},
 			}, nil
-		}),*/
-		),
-		transactionmock.New(
-			transactionmock.WithSendFunc(func(c context.Context, request *transaction.TxRequest) (common.Hash, error) {
-				if request.To != chequebookAddress {
-					t.Fatalf("sending to wrong contract. wanted %x, got %x", chequebookAddress, request.To)
-				}
-				if request.Value.Cmp(big.NewInt(0)) != 0 {
-					t.Fatal("sending ether to chequebook contract")
-				}
-				return txHash, nil
-			}),
-			transactionmock.WithWatchForReceiptFunc(func(ctx context.Context, txHash common.Hash) (chan *types.Receipt, chan error) {
-				return nil, nil
-			}),
-		),
-		chequestoremock.NewChequeStore(
-			chequestoremock.WithLastChequeFunc(func(c common.Address) (*chequebook.SignedCheque, error) {
-				if c != chequebookAddress {
-					t.Fatalf("using wrong chequebook. wanted %v, got %v", chequebookAddress, c)
-				}
-				return cheque, nil
-			}),
+		}),*/ /*
 		),
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	returnedTxHash, err := cashoutService.CashCheque(context.Background(), chequebookAddress, recipientAddress)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if returnedTxHash != txHash {
-		t.Fatalf("returned wrong transaction hash. wanted %v, got %v", txHash, returnedTxHash)
-	}
-
-	status, err := cashoutService.CashoutStatus(context.Background(), chequebookAddress)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	if status.Reverted {
 		t.Fatal("reported reverted transaction")

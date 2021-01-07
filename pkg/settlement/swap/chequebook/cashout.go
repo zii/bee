@@ -322,6 +322,9 @@ func (s *cashoutService) processCashChequeBeneficiaryReceipt(chequebook common.A
 
 // CashoutStatus gets the status of the latest cashout transaction for the chequebook
 func (s *cashoutService) CashoutStatus(ctx context.Context, chequebookAddress common.Address) (*CashoutStatus, error) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	// status struct to be filled
 	var cashoutStatus CashoutStatus
 
