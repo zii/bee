@@ -212,6 +212,82 @@ func TestListener(t *testing.T) {
 			t.Fatal("timed out waiting for event")
 		}
 	})
+
+	t.Run("subscription events", func(t *testing.T) {
+		c := createArgs{
+			id:               hash[:],
+			owner:            addr[:],
+			amount:           big.NewInt(42),
+			normalisedAmount: big.NewInt(43),
+			depth:            100,
+			blockNumber:      1,
+		}
+
+		topup := topupArgs{
+			id:                hash[:],
+			amount:            big.NewInt(0),
+			normalisedBalance: big.NewInt(1),
+			blockNumber:       2,
+		}
+
+		depthIncrease := depthArgs{
+			id:                hash[:],
+			depth:             200,
+			normalisedBalance: big.NewInt(2),
+			blockNumber:       3,
+		}
+
+		priceUpdate := priceArgs{
+			price:       big.NewInt(500),
+			blockNumber: 4,
+		}
+
+		ev, evC := newEventUpdaterMock()
+		mf := newMockFilterer(
+			WithFilterLogEvents(
+				c.toLog(),
+			),
+			WithSubscriptionEvents(
+				topup.toLog(),
+				depthIncrease.toLog(),
+				priceUpdate.toLog(),
+			),
+			WithBlockHeight(0),
+		)
+		listener := listener.New(logging.New(ioutil.Discard, 0), mf, postageStampAddress, priceOracleAddress)
+		err := listener.Listen(0, ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		select {
+		case e := <-evC:
+			e.(createArgs).compare(t, c) // event args should be equal
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for event")
+		}
+
+		select {
+		case e := <-evC:
+			e.(topupArgs).compare(t, topup) // event args should be equal
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for event")
+		}
+
+		select {
+		case e := <-evC:
+			e.(depthArgs).compare(t, depthIncrease) // event args should be equal
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for event")
+		}
+
+		select {
+		case e := <-evC:
+			e.(priceArgs).compare(t, priceUpdate)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for event")
+		}
+	})
 }
 
 func newEventUpdaterMock() (*updater, chan interface{}) {
@@ -255,13 +331,16 @@ func (u *updater) UpdateDepth(id []byte, depth uint8, normalisedBalance *big.Int
 }
 
 func (u *updater) UpdatePrice(price *big.Int) error {
-	u.eventC <- priceArgs{price}
+	u.eventC <- priceArgs{
+		price: price,
+	}
 	return nil
 }
 
 type mockFilterer struct {
 	filterLogEvents    []types.Log
 	subscriptionEvents []types.Log
+	blockHeight        uint64
 	sub                *sub
 }
 
@@ -276,6 +355,18 @@ func newMockFilterer(opts ...Option) *mockFilterer {
 func WithFilterLogEvents(events ...types.Log) Option {
 	return optionFunc(func(s *mockFilterer) {
 		s.filterLogEvents = events
+	})
+}
+
+func WithSubscriptionEvents(events ...types.Log) Option {
+	return optionFunc(func(s *mockFilterer) {
+		s.subscriptionEvents = events
+	})
+}
+
+func WithBlockHeight(blockHeight uint64) Option {
+	return optionFunc(func(s *mockFilterer) {
+		s.blockHeight = blockHeight
 	})
 }
 
@@ -330,6 +421,7 @@ type createArgs struct {
 	amount           *big.Int
 	normalisedAmount *big.Int
 	depth            uint8
+	blockNumber      uint64
 }
 
 func (c createArgs) compare(t *testing.T, want createArgs) {
@@ -353,8 +445,9 @@ func (c createArgs) toLog() types.Log {
 		panic(err)
 	}
 	return types.Log{
-		Data:   b,
-		Topics: []common.Hash{createdTopic, common.BytesToHash(c.id)}, // 1st item is the function sig digest, 2nd is always the batch id
+		Data:        b,
+		Topics:      []common.Hash{createdTopic, common.BytesToHash(c.id)}, // 1st item is the function sig digest, 2nd is always the batch id
+		BlockNumber: c.blockNumber,
 	}
 }
 
@@ -362,6 +455,7 @@ type topupArgs struct {
 	id                []byte
 	amount            *big.Int
 	normalisedBalance *big.Int
+	blockNumber       uint64
 }
 
 func (ta topupArgs) compare(t *testing.T, want topupArgs) {
@@ -382,8 +476,9 @@ func (ta topupArgs) toLog() types.Log {
 		panic(err)
 	}
 	return types.Log{
-		Data:   b,
-		Topics: []common.Hash{topupTopic, common.BytesToHash(ta.id)}, // 1st item is the function sig digest, 2nd is always the batch id
+		Data:        b,
+		Topics:      []common.Hash{topupTopic, common.BytesToHash(ta.id)}, // 1st item is the function sig digest, 2nd is always the batch id
+		BlockNumber: ta.blockNumber,
 	}
 }
 
@@ -391,6 +486,7 @@ type depthArgs struct {
 	id                []byte
 	depth             uint8
 	normalisedBalance *big.Int
+	blockNumber       uint64
 }
 
 func (d depthArgs) compare(t *testing.T, want depthArgs) {
@@ -411,13 +507,15 @@ func (d depthArgs) toLog() types.Log {
 		panic(err)
 	}
 	return types.Log{
-		Data:   b,
-		Topics: []common.Hash{depthIncreaseTopic, common.BytesToHash(d.id)}, // 1st item is the function sig digest, 2nd is always the batch id
+		Data:        b,
+		Topics:      []common.Hash{depthIncreaseTopic, common.BytesToHash(d.id)}, // 1st item is the function sig digest, 2nd is always the batch id
+		BlockNumber: d.blockNumber,
 	}
 }
 
 type priceArgs struct {
-	price *big.Int
+	price       *big.Int
+	blockNumber uint64
 }
 
 func (p priceArgs) compare(t *testing.T, want priceArgs) {
@@ -432,8 +530,9 @@ func (p priceArgs) toLog() types.Log {
 		panic(err)
 	}
 	return types.Log{
-		Data:   b,
-		Topics: []common.Hash{priceUpdateTopic},
+		Data:        b,
+		Topics:      []common.Hash{priceUpdateTopic},
+		BlockNumber: p.blockNumber,
 	}
 }
 

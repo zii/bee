@@ -57,19 +57,51 @@ func New(
 }
 
 func (l *listener) Listen(from uint64, updater postage.EventUpdater) error {
-	blockHeight, err := l.ev.BlockHeight(context.Background())
+	ctx := context.Background()
+
+	eventChan := make(chan types.Log)
+	sub, err := l.ev.SubscribeFilterLogs(ctx, l.filterQuery(nil, nil), eventChan)
 	if err != nil {
 		return err
 	}
 
 	go func() {
-		err := l.catchUp(from, blockHeight, updater)
+		err := l.sync(from, updater, sub, eventChan)
 		if err != nil {
-			l.logger.Errorf("event listener catchUp: %v", err)
+			l.logger.Error("postage stamp sync: %v", err)
 		}
 	}()
 
 	return nil
+}
+
+func (l *listener) sync(from uint64, updater postage.EventUpdater, sub ethereum.Subscription, eventChan <-chan types.Log) error {
+	ctx := context.Background()
+	blockHeight, err := l.ev.BlockHeight(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = l.catchUp(from, blockHeight, updater)
+	if err != nil {
+		return fmt.Errorf("event listener catchUp: %w", err)
+	}
+
+	for {
+		select {
+		case err := <-sub.Err():
+			return fmt.Errorf("subscription error: %w", err)
+		case e := <-eventChan:
+			if e.BlockNumber == blockHeight {
+				// skip as this event is already included in catchUp (this assumption is not reorg-safe!)
+				continue
+			}
+			err = l.processEvent(e, updater)
+			if err != nil {
+				return fmt.Errorf("failed to process event: %w", err)
+			}
+		}
+	}
 }
 
 func (l *listener) filterQuery(from, to *big.Int) ethereum.FilterQuery {
