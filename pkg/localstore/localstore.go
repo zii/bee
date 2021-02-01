@@ -230,6 +230,7 @@ func New(path string, baseKey []byte, o *Options, logger logging.Logger) (db *DB
 			binary.BigEndian.PutUint64(b[8:16], uint64(fields.StoreTimestamp))
 			copy(b[16:], fields.Stamp)
 			value = append(b, fields.Data...)
+			db.logger.Debugf("localstore writing chunk with stamp: %v", fields.Stamp)
 			return value, nil
 		},
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
@@ -237,6 +238,7 @@ func New(path string, baseKey []byte, o *Options, logger logging.Logger) (db *DB
 			e.BinID = binary.BigEndian.Uint64(value[:8])
 			e.Stamp = value[16:headerSize]
 			e.Data = value[headerSize:]
+			db.logger.Debugf("localstore reading chunk with stamp: %v", e.Stamp)
 			return e, nil
 		},
 	})
