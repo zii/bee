@@ -9,14 +9,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ethersphere/bee/pkg/jsonhttp"
+	"github.com/ethersphere/bee/pkg/logging/httpaccess"
+	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"resenje.org/web"
-
-	"github.com/ethersphere/bee/pkg/jsonhttp"
-	"github.com/ethersphere/bee/pkg/logging/httpaccess"
-	"github.com/ethersphere/bee/pkg/swarm"
 )
 
 func (s *server) setupRouting() {
@@ -126,7 +125,20 @@ func (s *server) setupRouting() {
 			),
 		})),
 	)
-
+	handle(router, "/pins", web.ChainHandlers(
+		s.gatewayModeForbidEndpointHandler,
+		web.FinalHandler(jsonhttp.MethodHandler{
+			"GET": http.HandlerFunc(s.listPins),
+		})),
+	)
+	handle(router, "/pins/{address}", web.ChainHandlers(
+		s.gatewayModeForbidEndpointHandler,
+		web.FinalHandler(jsonhttp.MethodHandler{
+			"GET":    http.HandlerFunc(s.getPin),
+			"POST":   http.HandlerFunc(s.pinPin),
+			"DELETE": http.HandlerFunc(s.unpinPin),
+		})),
+	)
 	handle(router, "/pin/chunks/{address}", web.ChainHandlers(
 		s.gatewayModeForbidEndpointHandler,
 		web.FinalHandler(jsonhttp.MethodHandler{
