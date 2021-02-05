@@ -7,6 +7,7 @@ package test
 import (
 	"fmt"
 	"io/ioutil"
+	"math/big"
 	"os"
 	"strings"
 	"testing"
@@ -17,11 +18,17 @@ import (
 const (
 	key1 = "key1" // stores the serialized type
 	key2 = "key2" // stores a json array
+	key3 = "key1"
+	key4 = "key2"
+	key5 = "key1"
 )
 
 var (
 	value1 = &Serializing{value: "value1"}
 	value2 = []string{"a", "b", "c"}
+	value3 = int64(5607)
+	value4 = int64(-5607)
+	value5 = uint64(7607)
 )
 
 type Serializing struct {
@@ -123,6 +130,7 @@ func testPutGet(t *testing.T, f func(t *testing.T) storage.StateStorer) {
 
 	// check that the persisted values match
 	testPersistedValues(t, store, key1, key2, value1, value2)
+	testWriteInt64ReadBigIntValue(t, store)
 }
 
 func testIterator(t *testing.T, f func(t *testing.T) storage.StateStorer) {
@@ -197,6 +205,47 @@ func testPersistedValues(t *testing.T, store storage.StateStorer, key1, key2 str
 			t.Fatalf("deserialized data mismatch. expected %s but got %s", ss, s[i])
 		}
 	}
+}
+
+func testWriteInt64ReadBigIntValue(t *testing.T, store storage.StateStorer) {
+	t.Helper()
+
+	err := store.Put(key3, value3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	biggie := new(big.Int)
+	err = store.Get(key3, &biggie)
+
+	if biggie.Int64() != value3 {
+		t.Fatalf("expected %v, got %v", value3, biggie.Int64())
+	}
+
+	err = store.Put(key4, value4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	biggie2 := new(big.Int)
+	err = store.Get(key4, &biggie2)
+
+	if biggie2.Int64() != value4 {
+		t.Fatalf("expected %v, got %v", value4, biggie.Int64())
+	}
+
+	err = store.Put(key5, value5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	biggie3 := new(big.Int)
+	err = store.Get(key5, &biggie3)
+
+	if biggie3.Uint64() != value5 {
+		t.Fatalf("expected %v, got %v", value3, biggie3.Uint64())
+	}
+
 }
 
 func testStoreIterator(t *testing.T, store storage.StateStorer, prefix string, size int) {
