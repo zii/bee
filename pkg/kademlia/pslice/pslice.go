@@ -189,7 +189,7 @@ func (s *PSlice) AddBalanced(addr swarm.Address, po uint8) {
 	}
 
 	// used for sorting
-	bat := newBinaryAddressTree(po, math.MaxUint8)
+	bat := newBinaryAddressTree(po+1, math.MaxUint8)
 	bat.Insert(addr)
 	for i := range binPeers {
 		bat.Insert(binPeers[i])
