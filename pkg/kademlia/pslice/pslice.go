@@ -5,6 +5,7 @@
 package pslice
 
 import (
+	"math"
 	"sync"
 
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -157,6 +158,48 @@ func (s *PSlice) Add(addr swarm.Address, po uint8) {
 	tail := append([]swarm.Address{addr}, peers[s.bins[po]:]...)
 
 	peers = append(head, tail...)
+	s.peers = peers
+
+	incDeeper(bins, po)
+	s.bins = bins
+}
+
+// AddBalanced a peer at a certain PO and balance order of peers.
+func (s *PSlice) AddBalanced(addr swarm.Address, po uint8) {
+	s.Lock()
+	defer s.Unlock()
+
+	if e, _ := s.exists(addr); e {
+		return
+	}
+
+	peers, bins := s.copy()
+
+	head := peers[:s.bins[po]]
+
+	var (
+		binPeers []swarm.Address
+		tail     []swarm.Address
+	)
+	if len(s.bins)-1 > int(po) {
+		binPeers = peers[s.bins[po]:s.bins[po+1]]
+		tail = append(tail, peers[s.bins[po+1]:]...)
+	} else {
+		binPeers = peers[s.bins[po]:]
+	}
+
+	// used for sorting
+	bat := newBinaryAddressTree(po, math.MaxUint8)
+	bat.Insert(addr)
+	for i := range binPeers {
+		bat.Insert(binPeers[i])
+	}
+
+	orderedBinPeers := bat.LevelOrderSwitchingTraversalAddresses()
+
+	peers = head
+	peers = append(head, orderedBinPeers...)
+	peers = append(peers, tail...)
 	s.peers = peers
 
 	incDeeper(bins, po)

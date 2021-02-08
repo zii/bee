@@ -178,6 +178,131 @@ func TestAddRemove(t *testing.T) {
 	chkNotExists(t, ps, peers...)
 }
 
+func TestAddRemoveBalanced(t *testing.T) {
+	var (
+		bs    = pslice.New(4)
+		base  = test.RandomAddress()
+		peers = make([]swarm.Address, 8)
+	)
+
+	// 2 peers per bin
+	// indexes {0,1} {2,3} {4,5} {6,7}
+	for i := 0; i < 8; i += 2 {
+		a := test.RandomAddressAt(base, i)
+		peers[i] = a
+
+		b := test.RandomAddressAt(base, i)
+		peers[i+1] = b
+	}
+
+	// add one
+	bs.AddBalanced(peers[0], 0)
+	chkLen(t, bs, 1)
+	chkExists(t, bs, peers[:1]...)
+	chkNotExists(t, bs, peers[1:]...)
+
+	// check duplicates
+	bs.AddBalanced(peers[0], 0)
+	chkLen(t, bs, 1)
+	chkBins(t, bs, []uint{0, 1, 1, 1})
+	chkExists(t, bs, peers[:1]...)
+	chkNotExists(t, bs, peers[1:]...)
+
+	// check empty
+	bs.Remove(peers[0], 0)
+	chkLen(t, bs, 0)
+	chkBins(t, bs, []uint{0, 0, 0, 0})
+	chkNotExists(t, bs, peers...)
+
+	// add two in bin 0
+	bs.AddBalanced(peers[0], 0)
+	bs.AddBalanced(peers[1], 0)
+	chkLen(t, bs, 2)
+	chkBins(t, bs, []uint{0, 2, 2, 2})
+	chkExists(t, bs, peers[:2]...)
+	chkNotExists(t, bs, peers[2:]...)
+
+	bs.AddBalanced(peers[2], 1)
+	bs.AddBalanced(peers[3], 1)
+	chkLen(t, bs, 4)
+	chkBins(t, bs, []uint{0, 2, 4, 4})
+	chkExists(t, bs, peers[:4]...)
+	chkNotExists(t, bs, peers[4:]...)
+
+	bs.Remove(peers[1], 0)
+	chkLen(t, bs, 3)
+	chkBins(t, bs, []uint{0, 1, 3, 3})
+	chkExists(t, bs, peers[0], peers[2], peers[3])
+	chkNotExists(t, bs, append([]swarm.Address{peers[1]}, peers[4:]...)...)
+
+	// this should not move the last cursor
+	bs.AddBalanced(peers[7], 3)
+	chkLen(t, bs, 4)
+	chkBins(t, bs, []uint{0, 1, 3, 3})
+	chkExists(t, bs, peers[0], peers[2], peers[3], peers[7])
+	chkNotExists(t, bs, append([]swarm.Address{peers[1]}, peers[4:7]...)...)
+
+	bs.AddBalanced(peers[5], 2)
+	chkLen(t, bs, 5)
+	chkBins(t, bs, []uint{0, 1, 3, 4})
+	chkExists(t, bs, peers[0], peers[2], peers[3], peers[5], peers[7])
+	chkNotExists(t, bs, []swarm.Address{peers[1], peers[4], peers[6]}...)
+
+	bs.Remove(peers[2], 1)
+	chkLen(t, bs, 4)
+	chkBins(t, bs, []uint{0, 1, 2, 3})
+	chkExists(t, bs, peers[0], peers[3], peers[5], peers[7])
+	chkNotExists(t, bs, []swarm.Address{peers[1], peers[2], peers[4], peers[6]}...)
+
+	p := uint8(0)
+	for i := 0; i < 8; i += 2 {
+		bs.Remove(peers[i], p)
+		bs.Remove(peers[i+1], p)
+		p++
+	}
+
+	// check empty again
+	chkLen(t, bs, 0)
+	chkBins(t, bs, []uint{0, 0, 0, 0})
+	chkNotExists(t, bs, peers...)
+}
+
+func TestManyAddRemoveBalanced(t *testing.T) {
+	var (
+		bins        = 4
+		peersPerBin = 8
+		totalPeers  = bins * peersPerBin
+		bs          = pslice.New(bins)
+		base        = test.RandomAddress()
+		peers       = make([]swarm.Address, totalPeers)
+		pos         = make([]int, totalPeers)
+	)
+
+	for i := 0; i < totalPeers; i += peersPerBin {
+		for j := 0; j < peersPerBin; j++ {
+			po := i / peersPerBin
+			a := test.RandomAddressAt(base, po)
+			peers[i+j] = a
+			pos[i+j] = po
+		}
+	}
+
+	for i := range peers {
+		bs.AddBalanced(peers[i], uint8(pos[i]))
+	}
+
+	chkLen(t, bs, totalPeers)
+	chkExists(t, bs, peers...)
+
+	for i := range peers {
+		bs.Remove(peers[i], uint8(pos[i]))
+	}
+
+	// check empty again
+	chkLen(t, bs, 0)
+	chkNotExists(t, bs, peers...)
+}
+
 // TestIteratorError checks that error propagation works correctly in the iterators.
 func TestIteratorError(t *testing.T) {
 	var (
