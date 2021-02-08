@@ -185,7 +185,7 @@ func (k *Kad) manage() {
 				k.waitNext[peer.String()] = retryInfo{tryAfter: time.Now().Add(shortRetry)}
 				k.waitNextMu.Unlock()
 
-				k.connectedPeers.Add(peer, po)
+				k.connectedPeers.AddBalanced(peer, po)
 
 				k.depthMu.Lock()
 				k.depth = recalcDepth(k.connectedPeers)
@@ -440,7 +440,7 @@ func (k *Kad) AddPeers(ctx context.Context, addrs ...swarm.Address) error {
 		}
 
 		po := swarm.Proximity(k.base.Bytes(), addr.Bytes())
-		k.knownPeers.Add(addr, po)
+		k.knownPeers.AddBalanced(addr, po)
 	}
 
 	select {
@@ -471,8 +471,8 @@ func (k *Kad) connected(ctx context.Context, addr swarm.Address) error {
 	}
 
 	po := swarm.Proximity(k.base.Bytes(), addr.Bytes())
-	k.knownPeers.Add(addr, po)
-	k.connectedPeers.Add(addr, po)
+	k.knownPeers.AddBalanced(addr, po)
+	k.connectedPeers.AddBalanced(addr, po)
 
 	k.waitNextMu.Lock()
 	delete(k.waitNext, addr.String())
