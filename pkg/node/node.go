@@ -114,6 +114,9 @@ type Options struct {
 }
 
 func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o Options) (*Bee, error) {
+	b := &Bee{
+		errorLogWriter: logger.WriterLevel(logrus.ErrorLevel),
+	}
 	if o.DebugAPIAddr != "" {
 		// Debug API server
 
@@ -142,7 +145,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		}()
 
 	}
-	b := &Bee{}
+
 	return b, nil
 }
 
