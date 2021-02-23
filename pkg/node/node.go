@@ -145,6 +145,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		}()
 
 	}
+	logger.Warn("node haz only debugapi. copy ur stuffz and be gonz")
 
 	return b, nil
 }
