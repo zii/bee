@@ -156,6 +156,7 @@ func newTestDB(t testing.TB, o *Options) *DB {
 	if _, err := rand.Read(baseKey); err != nil {
 		t.Fatal(err)
 	}
+
 	logger := logging.New(ioutil.Discard, 0)
 	db, err := New("", baseKey, o, logger)
 	if err != nil {
@@ -222,7 +223,7 @@ func TestGenerateTestRandomChunk(t *testing.T) {
 		t.Errorf("first chunk address length %v, want %v", addrLen, 32)
 	}
 	dataLen := len(c1.Data())
-	if dataLen != swarm.ChunkSize+swarm.SpanSize {
+	if dataLen != swarm.ChunkWithSpanSize {
 		t.Errorf("first chunk data length %v, want %v", dataLen, swarm.ChunkSize)
 	}
 	addrLen = len(c2.Address().Bytes())
@@ -230,7 +231,7 @@ func TestGenerateTestRandomChunk(t *testing.T) {
 		t.Errorf("second chunk address length %v, want %v", addrLen, 32)
 	}
 	dataLen = len(c2.Data())
-	if dataLen != swarm.ChunkSize+swarm.SpanSize {
+	if dataLen != swarm.ChunkWithSpanSize {
 		t.Errorf("second chunk data length %v, want %v", dataLen, swarm.ChunkSize)
 	}
 	if c1.Address().Equal(c2.Address()) {
@@ -251,7 +252,7 @@ func newRetrieveIndexesTest(db *DB, chunk swarm.Chunk, storeTimestamp, accessTim
 		if err != nil {
 			t.Fatal(err)
 		}
-		validateItem(t, item, chunk.Address().Bytes(), chunk.Data(), storeTimestamp, 0, chunk.Stamp())
+		validateItem(t, item, chunk.Address().Bytes(), chunk.Data(), storeTimestamp, 0)
 
 		// access index should not be set
 		wantErr := leveldb.ErrNotFound
@@ -272,14 +273,14 @@ func newRetrieveIndexesTestWithAccess(db *DB, ch swarm.Chunk, storeTimestamp, ac
 		if err != nil {
 			t.Fatal(err)
 		}
-		validateItem(t, item, ch.Address().Bytes(), ch.Data(), storeTimestamp, 0, ch.Stamp())
+		validateItem(t, item, ch.Address().Bytes(), ch.Data(), storeTimestamp, 0)
 
 		if accessTimestamp > 0 {
 			item, err = db.retrievalAccessIndex.Get(addressToItem(ch.Address()))
 			if err != nil {
 				t.Fatal(err)
 			}
-			validateItem(t, item, ch.Address().Bytes(), nil, 0, accessTimestamp, ch.Stamp())
+			validateItem(t, item, ch.Address().Bytes(), nil, 0, accessTimestamp)
 		}
 	}
 }
@@ -298,7 +299,7 @@ func newPullIndexTest(db *DB, ch swarm.Chunk, binID uint64, wantError error) fun
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, ch.Address().Bytes(), nil, 0, 0, ch.Stamp())
+			validateItem(t, item, ch.Address().Bytes(), nil, 0, 0)
 		}
 	}
 }
@@ -317,7 +318,7 @@ func newPushIndexTest(db *DB, ch swarm.Chunk, storeTimestamp int64, wantError er
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, ch.Address().Bytes(), nil, storeTimestamp, 0, ch.Stamp())
+			validateItem(t, item, ch.Address().Bytes(), nil, storeTimestamp, 0)
 		}
 	}
 }
@@ -337,7 +338,7 @@ func newGCIndexTest(db *DB, chunk swarm.Chunk, storeTimestamp, accessTimestamp i
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, chunk.Address().Bytes(), nil, 0, accessTimestamp, chunk.Stamp())
+			validateItem(t, item, chunk.Address().Bytes(), nil, 0, accessTimestamp)
 		}
 	}
 }
@@ -355,7 +356,7 @@ func newPinIndexTest(db *DB, chunk swarm.Chunk, wantError error) func(t *testing
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, chunk.Address().Bytes(), nil, 0, 0, chunk.Stamp())
+			validateItem(t, item, chunk.Address().Bytes(), nil, 0, 0)
 		}
 	}
 }
@@ -438,7 +439,7 @@ func testItemsOrder(t *testing.T, i shed.Index, chunks []testIndexChunk, sortFun
 }
 
 // validateItem is a helper function that checks Item values.
-func validateItem(t *testing.T, item shed.Item, address, data []byte, storeTimestamp, accessTimestamp int64, stamp []byte) {
+func validateItem(t *testing.T, item shed.Item, address, data []byte, storeTimestamp, accessTimestamp int64) {
 	t.Helper()
 
 	if !bytes.Equal(item.Address, address) {
@@ -452,9 +453,6 @@ func validateItem(t *testing.T, item shed.Item, address, data []byte, storeTimes
 	}
 	if item.AccessTimestamp != accessTimestamp {
 		t.Errorf("got item access timestamp %v, want %v", item.AccessTimestamp, accessTimestamp)
-	}
-	if stamp != nil && item.Stamp != nil && !bytes.Equal(item.Stamp, stamp) {
-		t.Errorf("got stamp %v want %v", item.Stamp, stamp)
 	}
 }
 
@@ -517,7 +515,7 @@ func TestSetNow(t *testing.T) {
 	}
 }
 
-func testIndexCounts(t *testing.T, pushIndex, pullIndex, gcIndex, gcExcludeIndex, pinIndex, retrievalDataIndex, retrievalAccessIndex int, indexInfo map[string]int) {
+func testIndexCounts(t *testing.T, pushIndex, pullIndex, gcIndex, pinIndex, retrievalDataIndex, retrievalAccessIndex int, indexInfo map[string]int) {
 	t.Helper()
 	if indexInfo["pushIndex"] != pushIndex {
 		t.Fatalf("pushIndex count mismatch. got %d want %d", indexInfo["pushIndex"], pushIndex)
@@ -529,10 +527,6 @@ func testIndexCounts(t *testing.T, pushIndex, pullIndex, gcIndex, gcExcludeIndex
 
 	if indexInfo["gcIndex"] != gcIndex {
 		t.Fatalf("gcIndex count mismatch. got %d want %d", indexInfo["gcIndex"], gcIndex)
-	}
-
-	if indexInfo["gcExcludeIndex"] != gcExcludeIndex {
-		t.Fatalf("gcExcludeIndex count mismatch. got %d want %d", indexInfo["gcExcludeIndex"], gcExcludeIndex)
 	}
 
 	if indexInfo["pinIndex"] != pinIndex {
@@ -552,7 +546,6 @@ func testIndexCounts(t *testing.T, pushIndex, pullIndex, gcIndex, gcExcludeIndex
 // index debug function
 func TestDBDebugIndexes(t *testing.T) {
 	db := newTestDB(t, nil)
-	ctx := context.Background()
 
 	uploadTimestamp := time.Now().UTC().UnixNano()
 	defer setNow(func() (t int64) {
@@ -561,7 +554,7 @@ func TestDBDebugIndexes(t *testing.T) {
 
 	ch := generateTestRandomChunk()
 
-	_, err := db.Put(ctx, storage.ModePutUpload, ch)
+	_, err := db.Put(context.Background(), storage.ModePutUpload, ch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,10 +564,11 @@ func TestDBDebugIndexes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testIndexCounts(t, 1, 1, 0, 0, 0, 1, 0, indexCounts)
+	// for reference: testIndexCounts(t *testing.T, pushIndex, pullIndex, gcIndex, gcExcludeIndex, pinIndex, retrievalDataIndex, retrievalAccessIndex int, indexInfo map[string]int)
+	testIndexCounts(t, 1, 1, 0, 0, 1, 0, indexCounts)
 
 	// set the chunk for pinning and expect the index count to grow
-	err = db.Set(ctx, storage.ModeSetPin, ch.Address())
+	err = db.Set(context.Background(), storage.ModeSetPin, ch.Address())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,5 +579,6 @@ func TestDBDebugIndexes(t *testing.T) {
 	}
 
 	// assert that there's a pin and gc exclude entry now
-	testIndexCounts(t, 1, 1, 0, 1, 1, 1, 0, indexCounts)
+	testIndexCounts(t, 1, 1, 0, 1, 1, 0, indexCounts)
+
 }
