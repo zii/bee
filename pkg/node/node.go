@@ -244,7 +244,27 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		}
 	}
 
-	batchStore := batchstore.New(stateStore)
+	// localstore depends on batchstore
+	var path string
+
+	if o.DataDir != "" {
+		path = filepath.Join(o.DataDir, "localstore")
+	}
+	lo := &localstore.Options{
+		Capacity: o.DBCapacity,
+	}
+	storer, err := localstore.New(path, swarmAddress.Bytes(), lo, logger)
+	if err != nil {
+		return nil, fmt.Errorf("localstore: %w", err)
+	}
+	b.localstoreCloser = storer
+	// register localstore unreserve function on the batchstore before batch service starts listening to blockchain events
+
+	batchStore, err := batchstore.New(stateStore, nil)
+	// batchStore, err := batchstore.New(stateStore, storer.UnreserveBatch)
+	if err != nil {
+		return nil, fmt.Errorf("batchstore: %w", err)
+	}
 
 	post := postage.NewService(stateStore, chainID.Int64())
 
@@ -270,11 +290,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		eventListener := listener.New(logger, swapBackend, postageContractAddress, priceOracleAddress)
 		b.listenerCloser = eventListener
 
-		batchService, err := batchservice.New(batchStore, logger, eventListener)
-		if err != nil {
-			return nil, err
-		}
-		err = batchService.Start()
+		_, err := batchservice.New(batchStore, logger, eventListener)
 		if err != nil {
 			return nil, err
 		}
@@ -415,20 +431,6 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	for _, addr := range addrs {
 		logger.Debugf("p2p address: %s", addr)
 	}
-
-	var path string
-
-	if o.DataDir != "" {
-		path = filepath.Join(o.DataDir, "localstore")
-	}
-	lo := &localstore.Options{
-		Capacity: o.DBCapacity,
-	}
-	storer, err := localstore.New(path, swarmAddress.Bytes(), lo, logger)
-	if err != nil {
-		return nil, fmt.Errorf("localstore: %w", err)
-	}
-	b.localstoreCloser = storer
 
 	retrieve := retrieval.New(swarmAddress, storer, p2ps, kad, logger, acc, accounting.NewFixedPricer(swarmAddress, 1000000000), tracer)
 	tagService := tags.NewTags(stateStore, logger)
