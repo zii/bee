@@ -172,8 +172,9 @@ func newTestDB(t testing.TB, o *Options) *DB {
 }
 
 var (
-	generateTestRandomChunk  = chunktesting.GenerateTestRandomChunk
-	generateTestRandomChunks = chunktesting.GenerateTestRandomChunks
+	generateTestRandomChunk   = chunktesting.GenerateTestRandomChunk
+	generateTestRandomChunkAt = chunktesting.GenerateTestRandomChunkAt
+	generateTestRandomChunks  = chunktesting.GenerateTestRandomChunks
 )
 
 // chunkAddresses return chunk addresses of provided chunks.

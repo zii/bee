@@ -24,6 +24,7 @@ import (
 	"github.com/ethersphere/bee/pkg/bmtpool"
 	postagetesting "github.com/ethersphere/bee/pkg/postage/testing"
 	"github.com/ethersphere/bee/pkg/swarm"
+	swarmtesting "github.com/ethersphere/bee/pkg/swarm/test"
 )
 
 var mockStamp swarm.Stamp
@@ -80,6 +81,15 @@ func GenerateTestRandomChunk() swarm.Chunk {
 
 	stamp := postagetesting.MustNewStamp()
 	return swarm.NewChunk(swarm.NewAddress(ref), data).WithStamp(stamp)
+}
+
+// GenerateTestRandomChunkAt generates an invalid (!) chunk with address of proximity order po wrt target.
+func GenerateTestRandomChunkAt(target swarm.Address, po int) swarm.Chunk {
+	data := make([]byte, swarm.ChunkSize)
+	_, _ = rand.Read(data)
+	addr := swarmtesting.RandomAddressAt(target, po)
+	stamp := postagetesting.MustNewStamp()
+	return swarm.NewChunk(addr, data).WithStamp(stamp)
 }
 
 // GenerateTestRandomInvalidChunk generates a random, however invalid, content

@@ -260,8 +260,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	b.localstoreCloser = storer
 	// register localstore unreserve function on the batchstore before batch service starts listening to blockchain events
 
-	batchStore, err := batchstore.New(stateStore, nil)
-	// batchStore, err := batchstore.New(stateStore, storer.UnreserveBatch)
+	batchStore, err := batchstore.New(stateStore, storer.UnreserveBatch)
 	if err != nil {
 		return nil, fmt.Errorf("batchstore: %w", err)
 	}
