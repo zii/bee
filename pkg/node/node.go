@@ -114,6 +114,28 @@ type Options struct {
 }
 
 func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o Options) (*Bee, error) {
+	path := ""
+	if o.DataDir != "" {
+		path = filepath.Join(o.DataDir, "localstore")
+	}
+	lo := &localstore.Options{
+		Capacity: o.DBCapacity,
+	}
+	storer, err := localstore.New(path, swarmAddress.Bytes(), lo, logger)
+	if err != nil {
+		return nil, fmt.Errorf("localstore: %w", err)
+	}
+
+	indices, err := storer.DebugIndices()
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println(indices)
+	storer.Close()
+	return nil, errors.New("go away")
+
+}
+func newBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o Options) (*Bee, error) {
 	tracer, tracerCloser, err := tracing.NewTracer(&tracing.Options{
 		Enabled:     o.TracingEnabled,
 		Endpoint:    o.TracingEndpoint,
