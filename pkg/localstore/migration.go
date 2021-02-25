@@ -17,8 +17,13 @@
 package localstore
 
 import (
+	"context"
 	"errors"
 	"fmt"
+
+	"github.com/ethersphere/bee/pkg/shed"
+	"github.com/ethersphere/bee/pkg/storage"
+	"github.com/ethersphere/bee/pkg/swarm"
 )
 
 var errMissingCurrentSchema = errors.New("could not find current db schema")
@@ -97,4 +102,30 @@ func getMigrations(currentSchema, targetSchema string, allSchemeMigrations []mig
 		return nil, errMissingTargetSchema
 	}
 	return migrations, nil
+}
+
+func gcAll(db *DB) {
+	page := 1000
+	ctx := context.Background()
+
+	i := 0
+	var addrs []swarm.Address
+	err := db.retrievalDataIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+		addr := swarm.NewAddress(item.Address)
+		addrs = append(addrs, addr)
+		i++
+		if i == page {
+			err := db.Set(ctx, storage.ModeSetSync, addrs...)
+			if err != nil {
+				return
+			}
+			i = 0
+		}
+
+		return false, nil
+	}, nil)
+	if err != nil {
+		db.logger.Errorf("set all sync error: %v", err)
+	}
+	db.logger.Info("set all sync OK")
 }
