@@ -16,6 +16,7 @@ type mock struct {
 	peers           []swarm.Address
 	closestPeer     swarm.Address
 	closestPeerErr  error
+	iteratorErr     error
 	addPeersErr     error
 	marshalJSONFunc func() ([]byte, error)
 	mtx             sync.Mutex
@@ -41,7 +42,13 @@ func WithClosestPeer(addr swarm.Address) Option {
 
 func WithClosestPeerErr(err error) Option {
 	return optionFunc(func(d *mock) {
-		d.closestPeerErr = err
+		d.iteratorErr = err
+	})
+}
+
+func WithIteratorErr(err error) Option {
+	return optionFunc(func(d *mock) {
+		d.iteratorErr = err
 	})
 }
 
@@ -133,6 +140,10 @@ func (d *mock) EachPeer(f topology.EachPeerFunc) (err error) {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 
+	if d.iteratorErr != nil {
+		return d.iteratorErr
+	}
+
 	for i, p := range d.peers {
 		_, _, err = f(p, uint8(i))
 		if err != nil {
@@ -147,6 +158,10 @@ func (d *mock) EachPeer(f topology.EachPeerFunc) (err error) {
 func (d *mock) EachPeerRev(f topology.EachPeerFunc) (err error) {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
+
+	if d.iteratorErr != nil {
+		return d.iteratorErr
+	}
 
 	for i := len(d.peers) - 1; i >= 0; i-- {
 		_, _, err = f(d.peers[i], uint8(i))
