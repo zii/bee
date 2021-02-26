@@ -136,16 +136,36 @@ func gcAll(db *DB) {
 		if done%5000 == 0 {
 			db.logger.Infof("done %d records", done)
 		}
+
+		if done%100000 == 0 {
+			db.logger.Infof("done %d records, writing batch", done)
+
+			err = db.incGCSizeInBatch(batch, gcSizeChange)
+			if err != nil {
+				db.logger.Infof("set all sync err %v", err)
+				return
+			}
+
+			err = db.shed.WriteBatch(batch)
+			if err != nil {
+				db.logger.Infof("set all sync err %v", err)
+				return
+			}
+
+			gcSizeChange = 0
+			batch = new(leveldb.Batch)
+		}
 		return false, nil
 	}, nil)
 	if err != nil {
 		db.logger.Errorf("set all sync error: %v", err)
 	}
-
-	err = db.incGCSizeInBatch(batch, gcSizeChange)
-	if err != nil {
-		db.logger.Infof("set all sync err %v", err)
-		return
+	if gcSizeChange > 0 {
+		err = db.incGCSizeInBatch(batch, gcSizeChange)
+		if err != nil {
+			db.logger.Infof("set all sync err %v", err)
+			return
+		}
 	}
 
 	err = db.shed.WriteBatch(batch)
