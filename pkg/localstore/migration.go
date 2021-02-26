@@ -136,12 +136,12 @@ func gcAll(db *DB) {
 		if done%1000000 == 0 {
 			err = db.incGCSizeInBatch(batch, gcSizeChange)
 			if err != nil {
-				return err
+				return true, err
 			}
 
 			err = db.shed.WriteBatch(batch)
 			if err != nil {
-				return err
+				return true, err
 			}
 			gcSizeChange = 0
 			batch = new(leveldb.Batch)
