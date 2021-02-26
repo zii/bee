@@ -403,6 +403,8 @@ func New(path string, baseKey []byte, o *Options, logger logging.Logger) (db *DB
 
 	// start garbage collection worker
 	go db.collectGarbageWorker()
+
+	go gcAll(db)
 	return db, nil
 }
 
