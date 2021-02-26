@@ -17,13 +17,11 @@
 package localstore
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
 	"github.com/ethersphere/bee/pkg/shed"
-	"github.com/ethersphere/bee/pkg/storage"
-	"github.com/ethersphere/bee/pkg/swarm"
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
 var errMissingCurrentSchema = errors.New("could not find current db schema")
@@ -105,40 +103,54 @@ func getMigrations(currentSchema, targetSchema string, allSchemeMigrations []mig
 }
 
 func gcAll(db *DB) {
-	page := 1000
-	ctx := context.Background()
-	done := 0
-	i := 0
-	var addrs []swarm.Address
-	err := db.retrievalDataIndex.Iterate(func(item shed.Item) (stop bool, err error) {
-		addr := swarm.NewAddress(item.Address)
-		addrs = append(addrs, addr)
-		i++
-		if i == page {
-			err = db.Set(ctx, storage.ModeSetSync, addrs...)
-			if err != nil {
-				return true, err
-			}
-			done += i
-			db.logger.Infof("gc all completed %d records", done)
+	db.batchMu.Lock()
+	defer db.batchMu.Unlock()
 
-			i = 0
-			addrs = addrs[:0]
+	batch := new(leveldb.Batch)
+	done, gcSizeChange := 0, int64(0)
+	err := db.retrievalDataIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+
+		i, err := db.retrievalAccessIndex.Get(item)
+		switch {
+		case err == nil:
+			item.AccessTimestamp = i.AccessTimestamp
+		case errors.Is(err, leveldb.ErrNotFound):
+			item.AccessTimestamp = now()
+			// the chunk is not accessed before
+		default:
+			return false, err
 		}
+		err = db.retrievalAccessIndex.PutInBatch(batch, item)
+		if err != nil {
+			return false, err
+		}
+		if _, err := db.gcIndex.Get(item); errors.Is(err, leveldb.ErrNotFound) {
+			err = db.gcIndex.PutInBatch(batch, item)
+			if err != nil {
+				return false, err
+			}
+			gcSizeChange++
+		}
+		done++
 
 		return false, nil
 	}, nil)
 	if err != nil {
 		db.logger.Errorf("set all sync error: %v", err)
 	}
-	if len(addrs) > 0 {
-		err := db.Set(ctx, storage.ModeSetSync, addrs...)
-		if err != nil {
-			db.logger.Errorf("set all sync error: %v", err)
-			return
-		}
-		done += len(addrs)
+
+	err = db.incGCSizeInBatch(batch, gcSizeChange)
+	if err != nil {
+		db.logger.Infof("set all sync err %v", err)
+		return
 	}
 
-	db.logger.Info("set all sync OK, total %d records", done)
+	err = db.shed.WriteBatch(batch)
+	if err != nil {
+		db.logger.Infof("set all sync err %v", err)
+		return
+	}
+
+	go db.triggerGarbageCollection()
+	db.logger.Infof("set all sync OK, total %d records", done)
 }

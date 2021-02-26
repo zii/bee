@@ -155,7 +155,7 @@ func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address, mode storage.Mod
 			// we handle this error internally, since this is an internal inconsistency of the indices
 			// this error can happen if the chunk is put with ModePutRequest or ModePutSync
 			// but this function is called with ModeSetSync
-			db.logger.Debugf("localstore: chunk with address %s not found in push index", addr)
+			//db.logger.Debugf("localstore: chunk with address %s not found in push index", addr)
 		} else {
 			return 0, err
 		}
