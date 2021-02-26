@@ -111,23 +111,25 @@ func gcAll(db *DB) {
 		switch {
 		case err == nil:
 			item.AccessTimestamp = i.AccessTimestamp
+			err = db.gcIndex.DeleteInBatch(batch, item)
+			if err != nil {
+				return 0, err
+			}
 		case errors.Is(err, leveldb.ErrNotFound):
-			item.AccessTimestamp = now()
 			// the chunk is not accessed before
 		default:
 			return false, err
 		}
+		item.AccessTimestamp = now()
 		err = db.retrievalAccessIndex.PutInBatch(batch, item)
 		if err != nil {
 			return false, err
 		}
-		if _, err := db.gcIndex.Get(item); errors.Is(err, leveldb.ErrNotFound) {
-			err = db.gcIndex.PutInBatch(batch, item)
-			if err != nil {
-				return false, err
-			}
-			gcSizeChange++
+		err = db.gcIndex.PutInBatch(batch, item)
+		if err != nil {
+			return false, err
 		}
+		gcSizeChange++
 		done++
 
 		if done%5000 == 0 {
