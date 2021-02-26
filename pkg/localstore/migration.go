@@ -107,7 +107,7 @@ func getMigrations(currentSchema, targetSchema string, allSchemeMigrations []mig
 func gcAll(db *DB) {
 	page := 1000
 	ctx := context.Background()
-
+	done := 0
 	i := 0
 	var addrs []swarm.Address
 	err := db.retrievalDataIndex.Iterate(func(item shed.Item) (stop bool, err error) {
@@ -115,11 +115,15 @@ func gcAll(db *DB) {
 		addrs = append(addrs, addr)
 		i++
 		if i == page {
-			err := db.Set(ctx, storage.ModeSetSync, addrs...)
+			err = db.Set(ctx, storage.ModeSetSync, addrs...)
 			if err != nil {
-				return
+				return true, err
 			}
+			done += i
+			db.logger.Infof("gc all completed %d records", done)
+
 			i = 0
+			addrs = addrs[:0]
 		}
 
 		return false, nil
@@ -127,5 +131,14 @@ func gcAll(db *DB) {
 	if err != nil {
 		db.logger.Errorf("set all sync error: %v", err)
 	}
-	db.logger.Info("set all sync OK")
+	if len(addrs) > 0 {
+		err := db.Set(ctx, storage.ModeSetSync, addrs...)
+		if err != nil {
+			db.logger.Errorf("set all sync error: %v", err)
+			return
+		}
+		done += len(addrs)
+	}
+
+	db.logger.Info("set all sync OK, total %d records", done)
 }
