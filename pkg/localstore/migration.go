@@ -133,6 +133,9 @@ func gcAll(db *DB) {
 		}
 		done++
 
+		if done%5000 == 0 {
+			db.logger.Infof("done %d records", done)
+		}
 		return false, nil
 	}, nil)
 	if err != nil {
