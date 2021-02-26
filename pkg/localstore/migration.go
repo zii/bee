@@ -133,6 +133,19 @@ func gcAll(db *DB) {
 		if done%5000 == 0 {
 			db.logger.Infof("done %d records", done)
 		}
+		if done%1000000 == 0 {
+			err = db.incGCSizeInBatch(batch, gcSizeChange)
+			if err != nil {
+				return err
+			}
+
+			err = db.shed.WriteBatch(batch)
+			if err != nil {
+				return err
+			}
+			gcSizeChange = 0
+			batch = new(leveldb.Batch)
+		}
 		return false, nil
 	}, nil)
 	if err != nil {
