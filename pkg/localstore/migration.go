@@ -19,7 +19,6 @@ package localstore
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/ethersphere/bee/pkg/shed"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -104,8 +103,6 @@ func getMigrations(currentSchema, targetSchema string, allSchemeMigrations []mig
 }
 
 func gcAll(db *DB) {
-	db.batchMu.Lock()
-
 	batch := new(leveldb.Batch)
 	done, gcSizeChange := 0, int64(0)
 	err := db.retrievalDataIndex.Iterate(func(item shed.Item) (stop bool, err error) {
@@ -136,39 +133,15 @@ func gcAll(db *DB) {
 		if done%5000 == 0 {
 			db.logger.Infof("done %d records", done)
 		}
-
-		if done%100000 == 0 {
-			db.logger.Infof("done %d records, writing batch", done)
-
-			err = db.incGCSizeInBatch(batch, gcSizeChange)
-			if err != nil {
-				db.logger.Infof("set all sync err %v", err)
-				return
-			}
-
-			err = db.shed.WriteBatch(batch)
-			if err != nil {
-				db.logger.Infof("set all sync err %v", err)
-				return
-			}
-			db.batchMu.Unlock()
-			time.Sleep(1 * time.Second)
-			db.batchMu.Lock()
-
-			gcSizeChange = 0
-			batch = new(leveldb.Batch)
-		}
 		return false, nil
 	}, nil)
 	if err != nil {
 		db.logger.Errorf("set all sync error: %v", err)
 	}
-	if gcSizeChange > 0 {
-		err = db.incGCSizeInBatch(batch, gcSizeChange)
-		if err != nil {
-			db.logger.Infof("set all sync err %v", err)
-			return
-		}
+	err = db.incGCSizeInBatch(batch, gcSizeChange)
+	if err != nil {
+		db.logger.Infof("set all sync err %v", err)
+		return
 	}
 
 	err = db.shed.WriteBatch(batch)
@@ -176,8 +149,6 @@ func gcAll(db *DB) {
 		db.logger.Infof("set all sync err %v", err)
 		return
 	}
-	db.batchMu.Unlock()
 
-	go db.triggerGarbageCollection()
 	db.logger.Infof("set all sync OK, total %d records", done)
 }
