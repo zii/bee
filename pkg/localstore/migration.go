@@ -106,14 +106,13 @@ func gcAll(db *DB) {
 	batch := new(leveldb.Batch)
 	done, gcSizeChange := 0, int64(0)
 	err := db.retrievalDataIndex.Iterate(func(item shed.Item) (stop bool, err error) {
-
 		i, err := db.retrievalAccessIndex.Get(item)
 		switch {
 		case err == nil:
 			item.AccessTimestamp = i.AccessTimestamp
 			err = db.gcIndex.DeleteInBatch(batch, item)
 			if err != nil {
-				return 0, err
+				return false, err
 			}
 		case errors.Is(err, leveldb.ErrNotFound):
 			// the chunk is not accessed before
@@ -145,7 +144,7 @@ func gcAll(db *DB) {
 			if err != nil {
 				return true, err
 			}
-			gcSizeChange = 0
+			gcSizeChange = int64(0)
 			batch = new(leveldb.Batch)
 		}
 		return false, nil
