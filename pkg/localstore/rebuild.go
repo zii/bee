@@ -11,7 +11,7 @@ import (
 func (db *DB) Rebuild() error {
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
-
+	const lim = 100000
 	batch := new(leveldb.Batch)
 	count := 0
 	db.pullIndex.Iterate(func(item shed.Item) (stop bool, err error) {
@@ -19,7 +19,7 @@ func (db *DB) Rebuild() error {
 			return true, err
 		}
 		count++
-		if count%10000 == 0 {
+		if count%lim == 0 {
 			db.logger.Infof("pullsync cleanup writing batch %d", count)
 			err := db.shed.WriteBatch(batch)
 			if err != nil {
@@ -41,7 +41,7 @@ func (db *DB) Rebuild() error {
 			return true, err
 		}
 		count++
-		if count%10000 == 0 {
+		if count%lim == 0 {
 			db.logger.Infof("gc cleanup writing batch %d", count)
 			err := db.shed.WriteBatch(batch)
 			if err != nil {
@@ -85,7 +85,7 @@ func (db *DB) Rebuild() error {
 		gcChange++
 
 		count++
-		if count%10000 == 0 {
+		if count%lim == 0 {
 			db.logger.Infof("accesindex cleanup writing batch %d", count)
 			err := db.shed.WriteBatch(batch)
 			if err != nil {
@@ -129,7 +129,7 @@ func (db *DB) Rebuild() error {
 			gcChange++
 
 			count++
-			if count%10000 == 0 {
+			if count%lim == 0 {
 				db.logger.Infof("force gc cleanup writing batch %d", count)
 				err := db.shed.WriteBatch(batch)
 				if err != nil {
