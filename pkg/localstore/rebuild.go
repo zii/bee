@@ -154,6 +154,13 @@ func (db *DB) Rebuild() error {
 		return err
 	}
 
-	db.logger.Infof("force gc cleanup done,writing last batch!")
-	return db.shed.WriteBatch(batch)
+	err = db.shed.WriteBatch(batch)
+	if err != nil {
+		return err
+	}
+
+	db.logger.Infof("all done! calling gc")
+
+	go db.triggerGarbageCollection()
+	return nil
 }
