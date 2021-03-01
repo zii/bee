@@ -112,6 +112,15 @@ type Options struct {
 }
 
 func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o Options) (*Bee, error) {
+	debugAPIService := debugapi.New(swarmAddress, publicKey, pssPrivateKey.PublicKey, common.Address{}, nil, nil, nil, nil, logger, nil, nil, nil, nil, o.SwapEnable, nil, nil, debugapi.Options{
+		CORSAllowedOrigins: o.CORSAllowedOrigins,
+	})
+
+	debugAPIListener, err := net.Listen("tcp", o.DebugAPIAddr)
+	if err != nil {
+		return nil, fmt.Errorf("debug api listener: %w", err)
+	}
+
 	path := ""
 	if o.DataDir != "" {
 		path = filepath.Join(o.DataDir, "localstore")
