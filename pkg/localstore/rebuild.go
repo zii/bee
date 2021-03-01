@@ -3,6 +3,7 @@ package localstore
 import (
 	"encoding/hex"
 	"errors"
+	"time"
 
 	"github.com/ethersphere/bee/pkg/shed"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -59,7 +60,7 @@ func (db *DB) Rebuild() error {
 	db.gcSize.Put(0)
 	count = 0
 	lim = lim / 3
-
+	time.Sleep(5 * time.Minute)
 	// rebuild gc index
 	batch = new(leveldb.Batch)
 	gcChange := uint64(0)
@@ -105,6 +106,7 @@ func (db *DB) Rebuild() error {
 
 	db.gcSize.Put(gcChange)
 	count = 0
+	time.Sleep(5 * time.Minute)
 
 	// force data index into gc
 	batch = new(leveldb.Batch)
