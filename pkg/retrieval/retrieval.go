@@ -93,7 +93,6 @@ const (
 
 func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address) (swarm.Chunk, error) {
 	s.metrics.RequestCounter.Inc()
-
 	v, err, _ := s.singleflight.Do(addr.String(), func() (interface{}, error) {
 		span, logger, ctx := s.tracer.StartSpanFromContext(ctx, "retrieve-chunk", s.logger, opentracing.Tag{Key: "address", Value: addr.String()})
 		defer span.Finish()

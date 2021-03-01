@@ -8,26 +8,25 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
-func (db *DB) RebuildIndices() {
+func (db *DB) RebuildIndices() error {
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
 
 	batch := new(leveldb.Batch)
 	db.pullIndex.Iterate(func(item shed.Item) (stop bool, err error) {
-		if err = db.pullIndex.DeleteInBatch(item, batch); err != nil {
+		if err = db.pullIndex.DeleteInBatch(batch, item); err != nil {
 			return true, err
 		}
 		return false, nil
 	}, nil)
-
-	err = db.shed.WriteBatch(batch)
+	err := db.shed.WriteBatch(batch)
 	if err != nil {
 		return err
 	}
 
 	batch = new(leveldb.Batch)
 	db.gcIndex.Iterate(func(item shed.Item) (stop bool, err error) {
-		if err = db.gcIndex.DeleteInBatch(item, batch); err != nil {
+		if err = db.gcIndex.DeleteInBatch(batch, item); err != nil {
 			return true, err
 		}
 		return false, nil
@@ -42,64 +41,64 @@ func (db *DB) RebuildIndices() {
 	// rebuild gc index
 	batch = new(leveldb.Batch)
 	gcChange := uint64(0)
-	i, err := db.retrievalAccessIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+	err = db.retrievalAccessIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		i2, err := db.retrievalDataIndex.Get(item)
 		if err != nil {
-			db.logger.Warningf("access index item %s not found in data index. removing entry", hex.EncodeToString(item.Address))
-			if err := db.retrievalAccessIndex.DeleteInBatch(item, batch); err != nil {
+			db.logger.Warningf("access index item %s not found in data index. error %v. removing entry", hex.EncodeToString(item.Address), err)
+			if err := db.retrievalAccessIndex.DeleteInBatch(batch, item); err != nil {
 				return true, err
 			}
 			return false, nil
 		}
 
+		// todo need to check that item is not in push index or in pin index for this to fly on users machines too
 		i2.AccessTimestamp = item.AccessTimestamp
-		panic("check not in push index or in pin index")
-		if err := db.gcIndex.PutInBatch(i2, batch); err != nil {
+		if err := db.gcIndex.PutInBatch(batch, i2); err != nil {
 			return true, err
 		}
+
+		if err := db.pullIndex.PutInBatch(batch, i2); err != nil {
+			return true, err
+		}
+
 		gcChange++
 		return false, nil
 	}, nil)
-
-	// need to get access timestamp here as it is not
-	// provided by the access function, and it is not
-	// a property of a chunk provided to Accessor.Put.
-	i, err := db.retrievalAccessIndex.Get(item)
-	switch {
-	case err == nil:
-		item.AccessTimestamp = i.AccessTimestamp
-	case errors.Is(err, leveldb.ErrNotFound):
-	default:
-		return 0, err
-	}
-	i, err = db.retrievalDataIndex.Get(item)
+	err = db.shed.WriteBatch(batch)
 	if err != nil {
-		return 0, err
-	}
-	item.StoreTimestamp = i.StoreTimestamp
-	item.BinID = i.BinID
-
-	err = db.retrievalDataIndex.DeleteInBatch(batch, item)
-	if err != nil {
-		return 0, err
-	}
-	err = db.retrievalAccessIndex.DeleteInBatch(batch, item)
-	if err != nil {
-		return 0, err
-	}
-	err = db.pullIndex.DeleteInBatch(batch, item)
-	if err != nil {
-		return 0, err
-	}
-	err = db.gcIndex.DeleteInBatch(batch, item)
-	if err != nil {
-		return 0, err
-	}
-	// a check is needed for decrementing gcSize
-	// as delete is not reporting if the key/value pair
-	// is deleted or not
-	if _, err := db.gcIndex.Get(item); err == nil {
-		gcSizeChange = -1
+		return err
 	}
 
+	db.gcSize.Put(gcChange)
+
+	// force data index into gc
+	batch = new(leveldb.Batch)
+	err = db.retrievalDataIndex.Iterate(func(item shed.Item) (stop bool, err error) {
+		_, err = db.retrievalAccessIndex.Get(item)
+		if err != nil {
+			if !errors.Is(err, leveldb.ErrNotFound) {
+				return true, err
+			}
+			db.logger.Infof("chunk %s not found in access index, adding to access and gc indexes", hex.EncodeToString(item.Address))
+
+			// item not accessed
+			item.AccessTimestamp = now()
+			err = db.retrievalAccessIndex.PutInBatch(batch, item)
+			if err != nil {
+				return true, err
+			}
+
+			err = db.gcIndex.PutInBatch(batch, item)
+			if err != nil {
+				return true, err
+			}
+			gcChange++
+		}
+		return false, nil
+	}, nil)
+	err = db.shed.WriteBatch(batch)
+	if err != nil {
+		return err
+	}
+	return nil
 }
