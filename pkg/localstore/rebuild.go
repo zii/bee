@@ -96,9 +96,5 @@ func (db *DB) RebuildIndices() error {
 		}
 		return false, nil
 	}, nil)
-	err = db.shed.WriteBatch(batch)
-	if err != nil {
-		return err
-	}
-	return nil
+	return db.shed.WriteBatch(batch)
 }
