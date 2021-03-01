@@ -150,6 +150,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	if err != nil {
 		return nil, fmt.Errorf("localstore: %w", err)
 	}
+	b.localstoreCloser = storer
 
 	err = storer.Rebuild()
 	if err != nil {
@@ -558,6 +559,9 @@ func newBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 
 func (b *Bee) Shutdown(ctx context.Context) error {
 	errs := new(multiError)
+	if err := b.localstoreCloser.Close(); err != nil {
+		errs.add(fmt.Errorf("localstore: %w", err))
+	}
 
 	if b.apiCloser != nil {
 		if err := b.apiCloser.Close(); err != nil {
@@ -582,6 +586,8 @@ func (b *Bee) Shutdown(ctx context.Context) error {
 			return nil
 		})
 	}
+
+	return nil
 
 	if err := eg.Wait(); err != nil {
 		errs.add(err)

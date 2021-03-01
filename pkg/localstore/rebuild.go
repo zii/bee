@@ -60,6 +60,7 @@ func (db *DB) Rebuild() error {
 	db.gcSize.Put(0)
 	count = 0
 	lim = lim / 3
+	db.logger.Infof("gc and pullsync cleanup done, sleeping 5 minutes")
 	time.Sleep(5 * time.Minute)
 	// rebuild gc index
 	batch = new(leveldb.Batch)
@@ -99,12 +100,17 @@ func (db *DB) Rebuild() error {
 
 		return false, nil
 	}, nil)
+	if err != nil {
+		return err
+	}
 	err = db.shed.WriteBatch(batch)
 	if err != nil {
 		return err
 	}
 
 	db.gcSize.Put(gcChange)
+
+	db.logger.Infof("accessindex cleanup done, sleeping 5 minutes")
 	count = 0
 	time.Sleep(5 * time.Minute)
 
@@ -144,5 +150,10 @@ func (db *DB) Rebuild() error {
 		}
 		return false, nil
 	}, nil)
+	if err != nil {
+		return err
+	}
+
+	db.logger.Infof("force gc cleanup done,writing last batch!")
 	return db.shed.WriteBatch(batch)
 }
