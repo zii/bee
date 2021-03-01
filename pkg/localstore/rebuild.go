@@ -13,9 +13,19 @@ func (db *DB) Rebuild() error {
 	defer db.batchMu.Unlock()
 
 	batch := new(leveldb.Batch)
+	count := 0
 	db.pullIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		if err = db.pullIndex.DeleteInBatch(batch, item); err != nil {
 			return true, err
+		}
+		count++
+		if count%10000 == 0 {
+			db.logger.Infof("pullsync cleanup writing batch %d", count)
+			err := db.shed.WriteBatch(batch)
+			if err != nil {
+				return true, err
+			}
+			batch = new(leveldb.Batch)
 		}
 		return false, nil
 	}, nil)
@@ -23,11 +33,21 @@ func (db *DB) Rebuild() error {
 	if err != nil {
 		return err
 	}
+	count = 0
 
 	batch = new(leveldb.Batch)
 	db.gcIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		if err = db.gcIndex.DeleteInBatch(batch, item); err != nil {
 			return true, err
+		}
+		count++
+		if count%10000 == 0 {
+			db.logger.Infof("gc cleanup writing batch %d", count)
+			err := db.shed.WriteBatch(batch)
+			if err != nil {
+				return true, err
+			}
+			batch = new(leveldb.Batch)
 		}
 		return false, nil
 	}, nil)
@@ -37,6 +57,7 @@ func (db *DB) Rebuild() error {
 	}
 
 	db.gcSize.Put(0)
+	count = 0
 
 	// rebuild gc index
 	batch = new(leveldb.Batch)
@@ -62,6 +83,18 @@ func (db *DB) Rebuild() error {
 		}
 
 		gcChange++
+
+		count++
+		if count%10000 == 0 {
+			db.logger.Infof("accesindex cleanup writing batch %d", count)
+			err := db.shed.WriteBatch(batch)
+			if err != nil {
+				return true, err
+			}
+			db.gcSize.Put(gcChange)
+			batch = new(leveldb.Batch)
+		}
+
 		return false, nil
 	}, nil)
 	err = db.shed.WriteBatch(batch)
@@ -70,6 +103,7 @@ func (db *DB) Rebuild() error {
 	}
 
 	db.gcSize.Put(gcChange)
+	count = 0
 
 	// force data index into gc
 	batch = new(leveldb.Batch)
@@ -93,6 +127,17 @@ func (db *DB) Rebuild() error {
 				return true, err
 			}
 			gcChange++
+
+			count++
+			if count%10000 == 0 {
+				db.logger.Infof("force gc cleanup writing batch %d", count)
+				err := db.shed.WriteBatch(batch)
+				if err != nil {
+					return true, err
+				}
+				db.gcSize.Put(gcChange)
+				batch = new(leveldb.Batch)
+			}
 		}
 		return false, nil
 	}, nil)
