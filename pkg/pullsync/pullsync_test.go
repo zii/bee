@@ -15,7 +15,6 @@ import (
 	"github.com/ethersphere/bee/pkg/p2p"
 	"github.com/ethersphere/bee/pkg/p2p/streamtest"
 	"github.com/ethersphere/bee/pkg/pullsync"
-	"github.com/ethersphere/bee/pkg/pullsync/pullstorage"
 	"github.com/ethersphere/bee/pkg/pullsync/pullstorage/mock"
 	testingc "github.com/ethersphere/bee/pkg/storage/testing"
 	"github.com/ethersphere/bee/pkg/swarm"
@@ -212,8 +211,7 @@ func haveChunks(t *testing.T, s *mock.PullStorage, addrs ...swarm.Address) {
 }
 
 func newPullSync(s p2p.Streamer, o ...mock.Option) (*pullsync.Syncer, *mock.PullStorage) {
-	//storage := mock.NewPullStorage(o...)
-	pullstorage.New()
+	storage := mock.NewPullStorage(o...)
 	logger := logging.New(ioutil.Discard, 0)
 	unwrap := func(swarm.Chunk) {}
 	return pullsync.New(s, storage, unwrap, logger), storage
