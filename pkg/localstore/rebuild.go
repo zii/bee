@@ -8,7 +8,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
-func (db *DB) RebuildIndices() error {
+func (db *DB) Rebuild() error {
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
 
