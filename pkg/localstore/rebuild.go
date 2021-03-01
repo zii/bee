@@ -153,13 +153,17 @@ func (db *DB) Rebuild() error {
 	if err != nil {
 		return err
 	}
+	if count > 0 {
+		db.gcSize.Put(gcChange)
 
-	err = db.shed.WriteBatch(batch)
-	if err != nil {
-		return err
+		err = db.shed.WriteBatch(batch)
+		if err != nil {
+			return err
+		}
 	}
+	db.logger.Infof("gcSize %d", gcChange)
 
-	db.logger.Infof("all done! calling gc")
+	db.logger.Infof("all done! calling gc. give it a few minutes to do stuff before resetting the pod")
 
 	go db.triggerGarbageCollection()
 	return nil
