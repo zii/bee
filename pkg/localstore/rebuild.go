@@ -11,7 +11,7 @@ import (
 func (db *DB) Rebuild() error {
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
-	const lim = 100000
+	var lim = 100000
 	batch := new(leveldb.Batch)
 	count := 0
 	db.pullIndex.Iterate(func(item shed.Item) (stop bool, err error) {
@@ -58,6 +58,7 @@ func (db *DB) Rebuild() error {
 
 	db.gcSize.Put(0)
 	count = 0
+	lim = lim / 3
 
 	// rebuild gc index
 	batch = new(leveldb.Batch)
