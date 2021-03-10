@@ -46,6 +46,7 @@ type Receipt struct {
 }
 
 type PushSync struct {
+	addr          swarm.Address
 	streamer      p2p.StreamerDisconnecter
 	storer        storage.Putter
 	peerSuggester topology.ClosestPeerer
@@ -60,8 +61,9 @@ type PushSync struct {
 
 var timeToWaitForReceipt = 3 * time.Second // time to wait to get a receipt for a chunk
 
-func New(streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer topology.ClosestPeerer, tagger *tags.Tags, unwrap func(swarm.Chunk), logger logging.Logger, accounting accounting.Interface, pricer accounting.Pricer, tracer *tracing.Tracer) *PushSync {
+func New(addr swarm.Address, streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer topology.ClosestPeerer, tagger *tags.Tags, unwrap func(swarm.Chunk), logger logging.Logger, accounting accounting.Interface, pricer accounting.Pricer, tracer *tracing.Tracer) *PushSync {
 	ps := &PushSync{
+		addr:          addr,
 		streamer:      streamer,
 		storer:        storer,
 		peerSuggester: closestPeerer,
@@ -108,6 +110,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 	ps.metrics.TotalReceived.Inc()
 
 	chunk := swarm.NewChunk(swarm.NewAddress(ch.Address), ch.Data)
+	ps.logger.Infof("pushsync handler got delivery %s, peer %s, base %s", chunk.Address().String(), p.Address.String(), ps.addr.String())
 
 	if cac.Valid(chunk) {
 		if ps.unwrap != nil {
@@ -123,6 +126,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 	receipt, err := ps.pushToClosest(ctx, chunk)
 	if err != nil {
 		if errors.Is(err, topology.ErrWantSelf) {
+			ps.logger.Infof("pushsync handler want self. chunk %s, peer %s, base %s", chunk.Address().String(), p.Address.String(), ps.addr.String())
 
 			// store the chunk in the local store
 			_, err = ps.storer.Put(ctx, storage.ModePutSync, chunk)
@@ -154,6 +158,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 // a receipt from that peer and returns error or nil based on the receiving and
 // the validity of the receipt.
 func (ps *PushSync) PushChunkToClosest(ctx context.Context, ch swarm.Chunk) (*Receipt, error) {
+	ps.logger.Infof("pctc, chunk %s, cid %d", ch.Address(), GetCid(ctx))
 	r, err := ps.pushToClosest(ctx, ch)
 	if err != nil {
 		return nil, err
@@ -171,11 +176,12 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 
 	deferFuncs := make([]func(), 0)
 	defersFn := func() {
-		if len(deferFuncs) > 0 {
+		if l := len(deferFuncs); l > 0 {
 			for _, deferFn := range deferFuncs {
 				deferFn()
 			}
 			deferFuncs = deferFuncs[:0]
+			ps.logger.Infof("deferfunc executed, executed %d len %d", l, len(deferFuncs))
 		}
 	}
 	defer defersFn()
@@ -189,13 +195,6 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 
 		defersFn()
 
-		deferFuncs = append(deferFuncs, func() {
-			if lastErr != nil {
-				ps.metrics.TotalErrors.Inc()
-				logger.Errorf("pushsync: %v", lastErr)
-			}
-		})
-
 		// find next closest peer
 		peer, err := ps.peerSuggester.ClosestPeer(ch.Address(), skipPeers...)
 		if err != nil {
@@ -204,6 +203,15 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 			// if ErrWantSelf is returned, it means we are the closest peer.
 			return nil, fmt.Errorf("closest peer: %w", err)
 		}
+
+		deferFuncs = append(deferFuncs, func() {
+			if lastErr != nil {
+				ps.metrics.TotalErrors.Inc()
+				logger.Errorf("pushsync defer func lasterr: %v, cid %d", lastErr, GetCid(ctx))
+			}
+		})
+
+		ps.logger.Debugf("base %s recommended peer %s for chunk %s", ps.addr.String(), peer.String(), ch.Address().String())
 
 		// save found peer (to be skipped if there is some error with him)
 		skipPeers = append(skipPeers, peer)
@@ -278,4 +286,20 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 	}
 
 	return nil, topology.ErrNotFound
+}
+
+type (
+	Cid struct{}
+)
+
+func SetCid(ctx context.Context, id int) context.Context {
+	return context.WithValue(ctx, Cid{}, id)
+}
+
+func GetCid(ctx context.Context) int {
+	v, ok := ctx.Value(Cid{}).(int)
+	if ok {
+		return v
+	}
+	return -1
 }

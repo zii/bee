@@ -26,7 +26,20 @@ type (
 	requestHostKey    struct{}
 	tagKey            struct{}
 	targetsContextKey struct{}
+	cid               struct{}
 )
+
+func SetCid(ctx context.Context, id int) context.Context {
+	return context.WithValue(ctx, cid{}, id)
+}
+
+func GetCid(ctx context.Context) int {
+	v, ok := ctx.Value(cid{}).(int)
+	if ok {
+		return v
+	}
+	return -1
+}
 
 // SetHost sets the http request host in the context
 func SetHost(ctx context.Context, domain string) context.Context {

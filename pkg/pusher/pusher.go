@@ -117,17 +117,20 @@ LOOP:
 
 				return
 			}
+			s.logger.Infof("pusher got chunk %s to push, cib %d", ch.Address().String(), chunksInBatch)
 			mtx.Lock()
 			if _, ok := inflight[ch.Address().String()]; ok {
+				s.logger.Infof("pusher chunk %s already in batch, cib %d", ch.Address().String(), chunksInBatch)
 				mtx.Unlock()
 				<-sem
 				continue
 			}
+			s.logger.Infof("pusher chunk %s go for takeoff, cib %d", ch.Address().String(), chunksInBatch)
 
 			inflight[ch.Address().String()] = struct{}{}
 			mtx.Unlock()
-
-			go func(ctx context.Context, ch swarm.Chunk) {
+			crtx := pushsync.SetCid(ctx, chunksInBatch)
+			go func(ctx context.Context, ch swarm.Chunk, cib int) {
 				var (
 					err       error
 					startTime = time.Now()
@@ -139,8 +142,10 @@ LOOP:
 						s.metrics.TotalSynced.Inc()
 						s.metrics.SyncTime.Observe(time.Since(startTime).Seconds())
 						// only print this if there was no error while sending the chunk
-						logger.Tracef("pusher pushed chunk %s", ch.Address().String())
+						logger.Tracef("pusher pushed chunk %s, cib %d", ch.Address().String(), cib)
 					} else {
+						logger.Tracef("pusher did not push chunk %s, cib %d, err %v", ch.Address().String(), cib, err)
+
 						s.metrics.TotalErrors.Inc()
 						s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
 					}
@@ -158,8 +163,10 @@ LOOP:
 						// this is to make sure that the sent number does not diverge from the synced counter
 						// the edge case is on the uploader node, in the case where the uploader node is
 						// connected to other nodes, but is the closest one to the chunk.
+						s.logger.Errorf("pusher got err want self, chunk %s, took %v, cib %d", ch.Address().String(), time.Since(startTime), cib)
 						setSent = true
 					} else {
+						s.logger.Errorf("pusher got some other error: %v, chunk %s, took %v, cib %d", err, ch.Address().String(), time.Since(startTime), cib)
 						return
 					}
 				}
@@ -183,7 +190,7 @@ LOOP:
 						}
 					}
 				}
-			}(ctx, ch)
+			}(crtx, ch, chunksInBatch)
 		case <-timer.C:
 			// initially timer is set to go off as well as every time we hit the end of push index
 			startTime := time.Now()
@@ -196,7 +203,7 @@ LOOP:
 			chunksInBatch = 0
 
 			// and start iterating on Push index from the beginning
-			chunks, unsubscribe = s.storer.SubscribePush(ctx)
+			chunks, unsubscribe = s.storer.SubscribePush(cctx)
 
 			// reset timer to go off after retryInterval
 			timer.Reset(retryInterval)

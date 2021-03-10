@@ -39,6 +39,7 @@ func New(w io.Writer, level logrus.Level) Logger {
 	l.SetOutput(w)
 	l.SetLevel(level)
 	l.Formatter = &logrus.TextFormatter{
+		DisableColors: true,
 		FullTimestamp: true,
 	}
 	metrics := newMetrics()

@@ -317,6 +317,8 @@ func (s *Service) closestPeer(addr swarm.Address, skipPeers []swarm.Address, all
 }
 
 func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
+	stream.Reset()
+	return nil
 	w, r := protobuf.NewWriterAndReader(stream)
 	defer func() {
 		if err != nil {
