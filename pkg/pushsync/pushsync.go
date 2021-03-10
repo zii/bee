@@ -133,9 +133,11 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 			if err != nil {
 				return fmt.Errorf("chunk store: %w", err)
 			}
+			ps.logger.Infof("pushsync handler want self, writing receipt. chunk %s, peer %s, base %s", chunk.Address().String(), p.Address.String(), ps.addr.String())
 
 			receipt := pb.Receipt{Address: chunk.Address().Bytes()}
 			if err := w.WriteMsg(&receipt); err != nil {
+				ps.logger.Infof("pushsync handler want self, writing receipt. chunk %s, peer %s, base %s, error: %v", chunk.Address().String(), p.Address.String(), ps.addr.String(), err)
 				return fmt.Errorf("send receipt to peer %s: %w", p.Address.String(), err)
 			}
 
