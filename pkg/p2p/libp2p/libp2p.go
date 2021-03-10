@@ -383,6 +383,15 @@ func (s *Service) AddProtocol(p p2p.ProtocolSpec) (err error) {
 			s.peers.addStream(peerID, streamlibp2p, cancel)
 			defer s.peers.removeStream(peerID, streamlibp2p)
 
+			// cancel the context in handler when the stream is closed
+			n := newClosedStreamNotifiee(func(_ network.Network, s network.Stream) {
+				if stream.ID() == s.ID() {
+					cancel()
+				}
+			})
+			s.host.Network().Notify(n)
+			defer s.host.Network().StopNotify(n)
+
 			// tracing: get span tracing context and add it to the context
 			// silently ignore if the peer is not providing tracing
 			ctx, err := s.tracer.WithContextFromHeaders(ctx, stream.Headers())
@@ -689,4 +698,17 @@ func (s *Service) GetWelcomeMessage() string {
 
 func (s *Service) Ready() {
 	close(s.ready)
+}
+
+type closedStreamNotifiee struct {
+	network.Notifiee
+	f func(network.Network, network.Stream)
+}
+
+func newClosedStreamNotifiee(f func(network.Network, network.Stream)) *closedStreamNotifiee {
+	return &closedStreamNotifiee{Notifiee: new(network.NoopNotifiee), f: f}
+}
+
+func (n *closedStreamNotifiee) ClosedStream(net network.Network, stream network.Stream) {
+	n.f(net, stream)
 }
