@@ -83,6 +83,21 @@ func (r *peerRegistry) Disconnected(_ network.Network, c network.Conn) {
 
 }
 
+func (r *peerRegistry) ClosedStream(net network.Network, stream network.Stream) {
+	peerID := stream.Conn().RemotePeer()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	streams, ok := r.streams[peerID]
+	if !ok {
+		return
+	}
+	cancel, ok := streams[stream]
+	if !ok {
+		return
+	}
+	cancel()
+}
+
 func (r *peerRegistry) addStream(peerID libp2ppeer.ID, stream network.Stream, cancel context.CancelFunc) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
