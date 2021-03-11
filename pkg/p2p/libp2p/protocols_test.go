@@ -7,6 +7,7 @@ package libp2p_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -213,6 +214,47 @@ func TestDisconnectError(t *testing.T) {
 	// it is important to validate that disconnect will happen after NewStream()
 	_, _ = s2.NewStream(ctx, overlay1, nil, testProtocolName, testProtocolVersion, testStreamName)
 	expectPeersEventually(t, s1)
+}
+
+func TestStreamCancelation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s1, overlay1 := newService(t, 1, libp2pServiceOpts{})
+
+	s2, overlay2 := newService(t, 1, libp2pServiceOpts{})
+
+	if err := s1.AddProtocol(newTestProtocol(func(ctx context.Context, _ p2p.Peer, _ p2p.Stream) error {
+		fmt.Println("aaaaa")
+		select {
+		case <-ctx.Done():
+			fmt.Println("Jeeej")
+		case <-time.After(5 * time.Second):
+		}
+		fmt.Println("bbbbb")
+		return nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	addr := serviceUnderlayAddress(t, s1)
+
+	if _, err := s2.Connect(ctx, addr); err != nil {
+		t.Fatal(err)
+	}
+
+	expectPeers(t, s1, overlay2)
+
+	s, err := s2.NewStream(ctx, overlay1, nil, testProtocolName, testProtocolVersion, testStreamName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.FullClose(); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(7 * time.Second)
 }
 
 func TestConnectDisconnectEvents(t *testing.T) {

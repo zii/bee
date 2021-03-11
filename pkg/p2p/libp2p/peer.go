@@ -7,6 +7,7 @@ package libp2p
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 
@@ -85,24 +86,20 @@ func (r *peerRegistry) Disconnected(_ network.Network, c network.Conn) {
 
 func (r *peerRegistry) ClosedStream(net network.Network, stream network.Stream) {
 	peerID := stream.Conn().RemotePeer()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	streams, ok := r.streams[peerID]
-	if !ok {
-		return
-	}
-	cancel, ok := streams[stream]
-	if !ok {
-		return
-	}
-	cancel()
+
+	fmt.Println("cancel", peerID, stream.ID(), stream.Protocol(), net.LocalPeer().Pretty())
+	fmt.Println("peers", r.streams)
+
+	r.removeStream(peerID, stream)
 }
 
 func (r *peerRegistry) addStream(peerID libp2ppeer.ID, stream network.Stream, cancel context.CancelFunc) {
+	fmt.Println("Add stream", peerID, stream.Protocol(), stream.ID())
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.streams[peerID]; !ok {
 		// it is possible that an addStream will be called after a disconnect
+		fmt.Println("NO PEER", peerID)
 		return
 	}
 	r.streams[peerID][stream] = cancel
@@ -114,15 +111,18 @@ func (r *peerRegistry) removeStream(peerID libp2ppeer.ID, stream network.Stream)
 
 	peer, ok := r.streams[peerID]
 	if !ok {
+		fmt.Println("peer not found", peerID)
 		return
 	}
 
 	cancel, ok := peer[stream]
 	if !ok {
+		fmt.Println("stream not found", stream.ID())
 		return
 	}
 
 	cancel()
+	fmt.Println("canceled", peerID, stream.ID(), stream.Protocol())
 
 	delete(r.streams[peerID], stream)
 }

@@ -361,6 +361,7 @@ func (s *Service) AddProtocol(p p2p.ProtocolSpec) (err error) {
 
 		s.host.SetStreamHandlerMatch(id, matcher, func(streamlibp2p network.Stream) {
 			peerID := streamlibp2p.Conn().RemotePeer()
+			fmt.Println("HANDLE Stream", id, streamlibp2p.Protocol(), peerID)
 			overlay, found := s.peers.overlay(peerID)
 			if !found {
 				_ = s.Disconnect(overlay)
