@@ -23,14 +23,15 @@ type batch struct {
 
 type binder struct {
 	active *batch
-
-	mtx sync.RWMutex
+	in     chan put
+	mtx    sync.RWMutex
 
 	quit chan struct{}
 }
 
 func NewPutBinder() *binder {
 	return &binder{
+		in: make(chan put),
 		active: &batch{
 			c:    sync.NewCond(new(sync.RWMutex)),
 			feed: make(chan swarm.Chunk, writeBuffer),
@@ -45,6 +46,20 @@ var (
 )
 
 func (b *binder) run() {
+	csw := make(chan chan put)
+	go func(cr chan put) {
+		cr := cr
+		for {
+			select {
+			case p := <-b.in:
+				cr <- p
+			case newchan := <-csw:
+				close(cr)
+				cr = newchan
+			}
+		}
+	}(b.active.feed)
+
 	buffer := make(map[string][]swarm.Chunk)
 	var t <-chan time.Time
 	for {
@@ -64,11 +79,17 @@ func (b *binder) run() {
 				c:    sync.NewCond(new(sync.RWMutex)),
 				feed: make(chan swarm.Chunk),
 			}
-
+			csw <- b.feed
 			// other writes can already grab the new batch
 			// and write into the channel buffer while this batch
 			// is still flushing.
 			b.mtx.Unlock()
+
+			// drain the channel
+			for p := range cur.feed {
+				chs := buffer[p.mode.String()]
+				buffer[p.mode.String()] = append(chs, p.ch)
+			}
 
 			// do the write
 			err := b.putAll()
