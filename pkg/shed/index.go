@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -299,6 +300,7 @@ type IterateOptions struct {
 // Iterate function iterates over keys of the Index.
 // If IterateOptions is nil, the iterations is over all keys.
 func (f Index) Iterate(fn IndexIterFunc, options *IterateOptions) (err error) {
+	start := time.Now()
 	if options == nil {
 		options = new(IterateOptions)
 	}
@@ -315,12 +317,14 @@ func (f Index) Iterate(fn IndexIterFunc, options *IterateOptions) (err error) {
 	}
 
 	it := f.db.NewIterator()
+	fmt.Println("shed index - new iterator", time.Since(start))
 	defer it.Release()
 
 	var ok bool
 
 	// move the cursor to the start key
 	ok = it.Seek(startKey)
+	fmt.Println("shed index - first seek", time.Since(start))
 
 	if !options.Reverse {
 		if !ok {
@@ -363,6 +367,7 @@ func (f Index) Iterate(fn IndexIterFunc, options *IterateOptions) (err error) {
 			}
 		}
 	}
+	fmt.Println("shed index - after else block", time.Since(start))
 
 	itSeekerFn := it.Next
 	if options.Reverse {
@@ -373,6 +378,8 @@ func (f Index) Iterate(fn IndexIterFunc, options *IterateOptions) (err error) {
 		// and it is explicitly configured to skip it
 		ok = itSeekerFn()
 	}
+	fmt.Println("shed index - before for", time.Since(start))
+
 	for ; ok; ok = itSeekerFn() {
 		item, err := f.itemFromIterator(it, prefix)
 		if err != nil {
@@ -389,6 +396,8 @@ func (f Index) Iterate(fn IndexIterFunc, options *IterateOptions) (err error) {
 			break
 		}
 	}
+	fmt.Println("shed index - done", time.Since(start))
+
 	return it.Error()
 }
 
