@@ -254,8 +254,6 @@ func (s *Syncer) SyncInterval(ctx context.Context, peer swarm.Address, bin uint8
 
 // handler handles an incoming request to sync an interval
 func (s *Syncer) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
-	stream.Reset()
-	return nil
 	w, r := protobuf.NewWriterAndReader(stream)
 	defer func() {
 		if err != nil {
