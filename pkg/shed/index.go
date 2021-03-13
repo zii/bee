@@ -151,6 +151,9 @@ func (f Index) Get(keyFields Item) (out Item, err error) {
 	if err != nil {
 		return out, fmt.Errorf("get value: %w", err)
 	}
+	if value == nil {
+		return out, fmt.Errorf("empty value: %w", leveldb.ErrNotFound)
+	}
 	out, err = f.decodeValueFunc(keyFields, value)
 	if err != nil {
 		return out, fmt.Errorf("decode value: %w", err)
