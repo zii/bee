@@ -1,4 +1,4 @@
-package localstore
+package pushsync
 
 import (
 	"context"
@@ -25,30 +25,34 @@ type binder struct {
 	active *batch
 	in     chan put
 	mtx    sync.RWMutex
+	putter storage.Putter
 
 	quit chan struct{}
 }
 
-func NewPutBinder() *binder {
-	return &binder{
+func NewPutBinder(p storage.Putter) *binder {
+	b := &binder{
 		in: make(chan put),
 		active: &batch{
 			c:    sync.NewCond(new(sync.RWMutex)),
-			feed: make(chan swarm.Chunk, writeBuffer),
+			feed: make(chan put, writeBuffer),
 		},
-		quit: make(chan struct{}),
+		putter: p,
+		quit:   make(chan struct{}),
 	}
+
+	go b.run()
+	return b
 }
 
 var (
-	collectionTime = 50 * time.Millisecond
+	collectionTime = 20 * time.Millisecond
 	writeBuffer    = 50 // how many chunks to buffer
 )
 
 func (b *binder) run() {
 	csw := make(chan chan put)
 	go func(cr chan put) {
-		cr := cr
 		for {
 			select {
 			case p := <-b.in:
@@ -60,13 +64,12 @@ func (b *binder) run() {
 		}
 	}(b.active.feed)
 
-	buffer := make(map[string][]swarm.Chunk)
+	buffer := []swarm.Chunk{}
 	var t <-chan time.Time
 	for {
 		select {
 		case p := <-b.active.feed:
-			chs := buffer[p.mode.String()]
-			buffer[p.mode.String()] = append(chs, p.ch)
+			buffer = append(buffer, p.ch)
 			if t == nil {
 				t = time.After(collectionTime)
 			}
@@ -77,9 +80,9 @@ func (b *binder) run() {
 
 			b.active = &batch{
 				c:    sync.NewCond(new(sync.RWMutex)),
-				feed: make(chan swarm.Chunk),
+				feed: make(chan put),
 			}
-			csw <- b.feed
+			csw <- b.active.feed
 			// other writes can already grab the new batch
 			// and write into the channel buffer while this batch
 			// is still flushing.
@@ -87,17 +90,16 @@ func (b *binder) run() {
 
 			// drain the channel
 			for p := range cur.feed {
-				chs := buffer[p.mode.String()]
-				buffer[p.mode.String()] = append(chs, p.ch)
+				buffer = append(buffer, p.ch)
 			}
 
 			// do the write
 			err := b.putAll()
 
 			// broadcast the result to all waiting goroutines
-			cur.c.Lock()
+			cur.c.L.Lock()
 			cur.err = err
-			cur.c.Unlock()
+			cur.c.L.Unlock()
 			cur.c.Broadcast()
 		case <-b.quit:
 			b.active.c.L.Lock()
@@ -110,33 +112,36 @@ func (b *binder) run() {
 }
 
 // external individual writes get routed here
-func (b *binder) Put(ctx context.Context, mode storage.ModePut, ch swarm.Chunk) (bool, error) {
+func (b *binder) Put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk) ([]bool, error) {
 	b.mtx.RLock()
 	a := b.active
 	b.mtx.RUnlock()
-
-	a.feed <- put{ch: ch, mode: mode}
+	for _, ch := range chs {
+		b.in <- put{ch: ch, mode: mode}
+	}
 	errc := make(chan error)
 	go func() {
-		a.L.RLock()
-		a.Wait()
+		a.c.L.Lock()
+		a.c.Wait()
 		errc <- a.err
-		a.L.RUnlock()
+		a.c.L.Unlock()
 	}()
 
 	select {
 	case e := <-errc:
-		return false, e
+		return []bool{}, e
 	case <-ctx.Done():
-		return false, ctx.Err()
+		return []bool{}, ctx.Err()
 	}
 }
 
 // this writes the entire batch to leveldb by calling localstore actual Put logic here
-func (b *binder) putAll(chs ...swarm.Chunk) {
-
+func (b *binder) putAll(chs ...swarm.Chunk) error {
+	_, err := b.putter.Put(context.Background(), storage.ModePutSync, chs...)
+	return err
 }
 
 func (b *binder) Close() error {
 	close(b.quit)
+	return nil
 }
