@@ -87,8 +87,8 @@ func New(stateStore storage.StateStorer, topology topology.Driver, pullSync pull
 	for i := uint8(0); i < bins; i++ {
 		p.syncPeers[i] = make(map[string]*syncPeer)
 	}
-	p.wg.Add(1)
-	go p.manage()
+	//p.wg.Add(1)
+	//go p.manage()
 	return p
 }
 
