@@ -65,6 +65,12 @@ func newMetrics() metrics {
 	subsystem := "localstore"
 
 	return metrics{
+		TotalTimeGCLock: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "gc_lock_time",
+			Help:      "Total time under lock in gc.",
+		}),
 		TotalTimeGCFirstItem: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,
