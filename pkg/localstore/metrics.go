@@ -161,6 +161,12 @@ func newMetrics() metrics {
 			Name:      "gc_collected_count",
 			Help:      "Number of times the GC_COLLECTED operation is done.",
 		}),
+		GCCommittedCounter: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "gc_committed_count",
+			Help:      "Number of gc items to commit.",
+		}),
 		GCExcludeCounter: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,
