@@ -10,6 +10,7 @@ import (
 )
 
 type metrics struct {
+	TotalTimeGCLock                 prometheus.Counter
 	TotalTimeGCFirstItem            prometheus.Counter
 	TotalTimeCollectGarbage         prometheus.Counter
 	TotalTimeGCExclude              prometheus.Counter
@@ -26,6 +27,7 @@ type metrics struct {
 	GCCounter                prometheus.Counter
 	GCErrorCounter           prometheus.Counter
 	GCCollectedCounter       prometheus.Counter
+	GCCommittedCounter       prometheus.Counter
 	GCExcludeCounter         prometheus.Counter
 	GCExcludeError           prometheus.Counter
 	GCExcludeWriteBatchError prometheus.Counter

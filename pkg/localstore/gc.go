@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ethersphere/bee/pkg/shed"
+	"github.com/ethersphere/bee/pkg/swarm"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -89,9 +90,17 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	batch := new(leveldb.Batch)
 	target := db.gcTarget()
 
-	// protect database from changing idexes and gcSize
+	// tell the localstore to start logging dirty addresses
 	db.batchMu.Lock()
-	defer db.batchMu.Unlock()
+	db.gcRunning = true
+	db.batchMu.Unlock()
+
+	defer func() {
+		db.batchMu.Lock()
+		db.gcRunning = false
+		db.dirtyAddresses = nil
+		db.batchMu.Unlock()
+	}()
 
 	// run through the recently pinned chunks and
 	// remove them from the gcIndex before iterating through gcIndex
@@ -109,6 +118,7 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	done = true
 	first := true
 	start := time.Now()
+	candidates := make([]shed.Item, 0)
 	err = db.gcIndex.Iterate(func(item shed.Item) (stop bool, err error) {
 		if first {
 			fmt.Println("gc time to first item", time.Since(start))
@@ -119,26 +129,8 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 			return true, nil
 		}
 
-		db.metrics.GCStoreTimeStamps.Set(float64(item.StoreTimestamp))
-		db.metrics.GCStoreAccessTimeStamps.Set(float64(item.AccessTimestamp))
+		candidates = append(candidates, item)
 
-		// delete from retrieve, pull, gc
-		err = db.retrievalDataIndex.DeleteInBatch(batch, item)
-		if err != nil {
-			return true, nil
-		}
-		err = db.retrievalAccessIndex.DeleteInBatch(batch, item)
-		if err != nil {
-			return true, nil
-		}
-		err = db.pullIndex.DeleteInBatch(batch, item)
-		if err != nil {
-			return true, nil
-		}
-		err = db.gcIndex.DeleteInBatch(batch, item)
-		if err != nil {
-			return true, nil
-		}
 		collectedCount++
 		if collectedCount >= gcBatchSize {
 			// bach size limit reached,
@@ -151,7 +143,43 @@ func (db *DB) collectGarbage() (collectedCount uint64, done bool, err error) {
 	if err != nil {
 		return 0, false, err
 	}
+
 	db.metrics.GCCollectedCounter.Add(float64(collectedCount))
+
+	// protect database from changing idexes and gcSize
+	db.batchMu.Lock()
+	defer totalTimeMetric(db.metrics.TotalTimeGCLock, time.Now())
+	defer db.batchMu.Unlock()
+
+	// get rid of dirty entries
+	for _, item := range candidates {
+		if swarm.NewAddress(item.Address).MemberOf(db.dirtyAddresses) {
+			collectedCount--
+			continue
+		}
+
+		db.metrics.GCStoreTimeStamps.Set(float64(item.StoreTimestamp))
+		db.metrics.GCStoreAccessTimeStamps.Set(float64(item.AccessTimestamp))
+
+		// delete from retrieve, pull, gc
+		err = db.retrievalDataIndex.DeleteInBatch(batch, item)
+		if err != nil {
+			return 0, false, err
+		}
+		err = db.retrievalAccessIndex.DeleteInBatch(batch, item)
+		if err != nil {
+			return 0, false, err
+		}
+		err = db.pullIndex.DeleteInBatch(batch, item)
+		if err != nil {
+			return 0, false, err
+		}
+		err = db.gcIndex.DeleteInBatch(batch, item)
+		if err != nil {
+			return 0, false, err
+		}
+	}
+	db.metrics.GCCommittedCounter.Add(float64(collectedCount))
 	db.gcSize.PutInBatch(batch, gcSize-collectedCount)
 
 	err = db.shed.WriteBatch(batch)
