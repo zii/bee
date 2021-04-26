@@ -83,8 +83,9 @@ func totalKeyPeer(key []byte, prefix string) (peer swarm.Address, err error) {
 	return swarm.ParseHexAddress(split[1])
 }
 
+// peerAllowance computes the maximum incoming payment value we accept
+// this is the time based allowance or the peers actual debt, whichever is less
 func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64, err error) {
-
 	var lastTime int64
 	err = s.store.Get(totalKey(peer, SettlementReceivedTimestampPrefix), &lastTime)
 	if err != nil {
@@ -96,8 +97,7 @@ func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64
 
 	currentTime := time.Now().Unix()
 	if currentTime == lastTime {
-		err = errors.New("pseudosettle too soon")
-		return nil, 0, err
+		return nil, 0, errors.New("pseudosettle too soon")
 	}
 
 	maxAllowance := new(big.Int).Mul(big.NewInt(currentTime-lastTime), s.refreshRate)
@@ -115,7 +115,6 @@ func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64
 }
 
 func (s *Service) headler(receivedHeaders p2p.Headers, peerAddress swarm.Address) (returnHeaders p2p.Headers) {
-
 	allowedLimit, timestamp, err := s.peerAllowance(peerAddress)
 	if err != nil {
 		return p2p.Headers{
