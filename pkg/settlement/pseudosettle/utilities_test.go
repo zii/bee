@@ -5,11 +5,12 @@
 package pseudosettle_test
 
 import (
-	"github.com/ethersphere/bee/pkg/p2p"
-	"github.com/ethersphere/bee/pkg/settlement/pseudosettle"
 	"math/big"
 	"reflect"
 	"testing"
+
+	"github.com/ethersphere/bee/pkg/p2p"
+	"github.com/ethersphere/bee/pkg/settlement/pseudosettle"
 )
 
 func TestMakeAllowanceResponseHeaders(t *testing.T) {

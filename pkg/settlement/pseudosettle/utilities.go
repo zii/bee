@@ -7,9 +7,10 @@ package pseudosettle
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/ethersphere/bee/pkg/p2p"
 	"math"
 	"math/big"
+
+	"github.com/ethersphere/bee/pkg/p2p"
 )
 
 const (
