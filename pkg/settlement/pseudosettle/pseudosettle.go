@@ -33,6 +33,8 @@ var (
 
 	SettlementReceivedTimestampPrefix = "pseudosettle_timestamp_received_"
 	SettlementSentTimestampPrefix     = "pseudosettle_timestamp_sent_"
+
+	ErrSettlementTooSoon = errors.New("settlement too soon")
 )
 
 type Service struct {
@@ -97,7 +99,7 @@ func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64
 
 	currentTime := time.Now().Unix()
 	if currentTime == lastTime {
-		return nil, 0, errors.New("pseudosettle too soon")
+		return nil, 0, ErrSettlementTooSoon
 	}
 
 	maxAllowance := new(big.Int).Mul(big.NewInt(currentTime-lastTime), s.refreshRate)
@@ -117,16 +119,12 @@ func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64
 func (s *Service) headler(receivedHeaders p2p.Headers, peerAddress swarm.Address) (returnHeaders p2p.Headers) {
 	allowedLimit, timestamp, err := s.peerAllowance(peerAddress)
 	if err != nil {
-		return p2p.Headers{
-			"error": []byte("Error creating response allowance headers"),
-		}
+		return p2p.Headers{}
 	}
 
 	returnHeaders, err = MakeAllowanceResponseHeaders(allowedLimit, timestamp)
 	if err != nil {
-		return p2p.Headers{
-			"error": []byte("Error creating response allowance headers"),
-		}
+		return p2p.Headers{}
 	}
 	s.logger.Debugf("settlement headler: response with allowance as %v, timestamp as %v, for peer %s", allowedLimit, timestamp, peerAddress)
 
@@ -172,7 +170,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	receivedPaymentF64, _ := big.NewFloat(0).SetInt(receivedPayment).Float64()
 
 	s.metrics.TotalReceivedPseudoSettlements.Add(receivedPaymentF64)
-	s.logger.Tracef("pseudosettle received payment message from peer %v of %d", p.Address, req.Amount)
+	s.logger.Tracef("pseudosettle received payment message from peer %v of %d", p.Address, receivedPayment)
 
 	err = s.store.Put(totalKey(p.Address, SettlementReceivedPrefix), totalReceived.Add(totalReceived, receivedPayment))
 	if err != nil {
@@ -210,7 +208,7 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) 
 
 	currentTime := time.Now().Unix()
 	if currentTime == lastTime {
-		err = errors.New("pseudosettle too soon")
+		err = ErrSettlementTooSoon
 		return
 	}
 
@@ -224,7 +222,7 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) 
 		if err != nil {
 			_ = stream.Reset()
 		} else {
-			go stream.FullClose()
+			_ = stream.FullClose()
 		}
 	}()
 
