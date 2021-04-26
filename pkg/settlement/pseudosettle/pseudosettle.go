@@ -31,9 +31,6 @@ var (
 	SettlementReceivedPrefix = "pseudosettle_total_received_"
 	SettlementSentPrefix     = "pseudosettle_total_sent_"
 
-	SettlementReceivedTimestampPrefix = "pseudosettle_timestamp_received_"
-	SettlementSentTimestampPrefix     = "pseudosettle_timestamp_sent_"
-
 	ErrSettlementTooSoon = errors.New("settlement too soon")
 )
 
@@ -44,6 +41,11 @@ type Service struct {
 	accountingAPI settlement.AccountingAPI
 	metrics       metrics
 	refreshRate   *big.Int
+}
+
+type lastPayment struct {
+	Timestamp int64
+	Total     *big.Int
 }
 
 func New(streamer p2p.Streamer, logger logging.Logger, store storage.StateStorer, accountingAPI settlement.AccountingAPI, refreshRate *big.Int) *Service {
@@ -88,21 +90,21 @@ func totalKeyPeer(key []byte, prefix string) (peer swarm.Address, err error) {
 // peerAllowance computes the maximum incoming payment value we accept
 // this is the time based allowance or the peers actual debt, whichever is less
 func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64, err error) {
-	var lastTime int64
-	err = s.store.Get(totalKey(peer, SettlementReceivedTimestampPrefix), &lastTime)
+	var lastTime lastPayment
+	err = s.store.Get(totalKey(peer, SettlementReceivedPrefix), &lastTime)
 	if err != nil {
 		if !errors.Is(err, storage.ErrNotFound) {
 			return nil, 0, err
 		}
-		lastTime = 0
+		lastTime.Timestamp = int64(0)
 	}
 
 	currentTime := time.Now().Unix()
-	if currentTime == lastTime {
+	if currentTime == lastTime.Timestamp {
 		return nil, 0, ErrSettlementTooSoon
 	}
 
-	maxAllowance := new(big.Int).Mul(big.NewInt(currentTime-lastTime), s.refreshRate)
+	maxAllowance := new(big.Int).Mul(big.NewInt(currentTime-lastTime.Timestamp), s.refreshRate)
 
 	peerDebt, err := s.accountingAPI.PeerDebt(peer)
 	if err != nil {
@@ -145,14 +147,6 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 		return fmt.Errorf("read request from peer %v: %w", p.Address, err)
 	}
 
-	totalReceived, err := s.TotalReceived(p.Address)
-	if err != nil {
-		if !errors.Is(err, settlement.ErrPeerNoSettlements) {
-			return err
-		}
-		totalReceived = big.NewInt(0)
-	}
-
 	responseHeaders := stream.ResponseHeaders()
 
 	allowance, timestamp, err := ParseAllowanceResponseHeaders(responseHeaders)
@@ -172,14 +166,21 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	s.metrics.TotalReceivedPseudoSettlements.Add(receivedPaymentF64)
 	s.logger.Tracef("pseudosettle received payment message from peer %v of %d", p.Address, receivedPayment)
 
-	err = s.store.Put(totalKey(p.Address, SettlementReceivedPrefix), totalReceived.Add(totalReceived, receivedPayment))
+	var lastTime lastPayment
+	err = s.store.Get(totalKey(p.Address, SettlementReceivedPrefix), &lastTime)
 	if err != nil {
-		return err
+		if !errors.Is(err, storage.ErrNotFound) {
+			return err
+		}
+		lastTime.Total = big.NewInt(0)
 	}
 
-	err = s.store.Put(totalKey(p.Address, SettlementReceivedTimestampPrefix), timestamp)
+	lastTime.Total = lastTime.Total.Add(lastTime.Total, receivedPayment)
+	lastTime.Timestamp = timestamp
+
+	err = s.store.Put(totalKey(p.Address, SettlementReceivedPrefix), lastTime)
 	if err != nil {
-		return
+		return err
 	}
 
 	return s.accountingAPI.NotifyPaymentReceived(p.Address, receivedPayment)
@@ -197,17 +198,18 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) 
 		}
 	}()
 
-	var lastTime int64
-	err = s.store.Get(totalKey(peer, SettlementSentTimestampPrefix), &lastTime)
+	var lastTime lastPayment
+	err = s.store.Get(totalKey(peer, SettlementSentPrefix), &lastTime)
 	if err != nil {
 		if !errors.Is(err, storage.ErrNotFound) {
 			return
 		}
-		lastTime = 0
+		lastTime.Total = big.NewInt(0)
+		lastTime.Timestamp = 0
 	}
 
 	currentTime := time.Now().Unix()
-	if currentTime == lastTime {
+	if currentTime == lastTime.Timestamp {
 		err = ErrSettlementTooSoon
 		return
 	}
@@ -246,20 +248,11 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) 
 	if err != nil {
 		return
 	}
-	totalSent, err := s.TotalSent(peer)
-	if err != nil {
-		if !errors.Is(err, settlement.ErrPeerNoSettlements) {
-			return
-		}
-		totalSent = big.NewInt(0)
-	}
 
-	err = s.store.Put(totalKey(peer, SettlementSentPrefix), totalSent.Add(totalSent, amount))
-	if err != nil {
-		return
-	}
+	lastTime.Total = lastTime.Total.Add(lastTime.Total, amount)
+	lastTime.Timestamp = timestamp
 
-	err = s.store.Put(totalKey(peer, SettlementSentTimestampPrefix), timestamp)
+	err = s.store.Put(totalKey(peer, SettlementSentPrefix), lastTime)
 	if err != nil {
 		return
 	}
@@ -278,28 +271,32 @@ func (s *Service) SetAccountingAPI(accountingAPI settlement.AccountingAPI) {
 
 // TotalSent returns the total amount sent to a peer
 func (s *Service) TotalSent(peer swarm.Address) (totalSent *big.Int, err error) {
-	key := totalKey(peer, SettlementSentPrefix)
-	err = s.store.Get(key, &totalSent)
+	var lastTime lastPayment
+
+	err = s.store.Get(totalKey(peer, SettlementSentPrefix), &lastTime)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if !errors.Is(err, storage.ErrNotFound) {
 			return nil, settlement.ErrPeerNoSettlements
 		}
-		return nil, err
+		lastTime.Total = big.NewInt(0)
 	}
-	return totalSent, nil
+
+	return lastTime.Total, nil
 }
 
 // TotalReceived returns the total amount received from a peer
 func (s *Service) TotalReceived(peer swarm.Address) (totalReceived *big.Int, err error) {
-	key := totalKey(peer, SettlementReceivedPrefix)
-	err = s.store.Get(key, &totalReceived)
+	var lastTime lastPayment
+
+	err = s.store.Get(totalKey(peer, SettlementReceivedPrefix), &lastTime)
 	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
+		if !errors.Is(err, storage.ErrNotFound) {
 			return nil, settlement.ErrPeerNoSettlements
 		}
-		return nil, err
+		lastTime.Total = big.NewInt(0)
 	}
-	return totalReceived, nil
+
+	return lastTime.Total, nil
 }
 
 // SettlementsSent returns all stored sent settlement values for a given type of prefix
