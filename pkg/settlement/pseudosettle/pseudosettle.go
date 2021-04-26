@@ -28,10 +28,6 @@ const (
 )
 
 var (
-	refreshRate = big.NewInt(10000000000000)
-)
-
-var (
 	SettlementReceivedPrefix = "pseudosettle_total_received_"
 	SettlementSentPrefix     = "pseudosettle_total_sent_"
 
@@ -45,15 +41,17 @@ type Service struct {
 	store         storage.StateStorer
 	accountingAPI settlement.AccountingAPI
 	metrics       metrics
+	refreshRate   *big.Int
 }
 
-func New(streamer p2p.Streamer, logger logging.Logger, store storage.StateStorer, accountingAPI settlement.AccountingAPI) *Service {
+func New(streamer p2p.Streamer, logger logging.Logger, store storage.StateStorer, accountingAPI settlement.AccountingAPI, refreshRate *big.Int) *Service {
 	return &Service{
 		streamer:      streamer,
 		logger:        logger,
 		metrics:       newMetrics(),
 		store:         store,
 		accountingAPI: accountingAPI,
+		refreshRate:   refreshRate,
 	}
 }
 
@@ -102,7 +100,7 @@ func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64
 		return nil, 0, err
 	}
 
-	maxAllowance := new(big.Int).Mul(big.NewInt(currentTime-lastTime), refreshRate)
+	maxAllowance := new(big.Int).Mul(big.NewInt(currentTime-lastTime), s.refreshRate)
 
 	peerDebt, err := s.accountingAPI.PeerDebt(peer)
 	if err != nil {

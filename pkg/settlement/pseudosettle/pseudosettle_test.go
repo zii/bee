@@ -70,6 +70,9 @@ func (t *testObserver) NotifyPaymentSent(peer swarm.Address, amount *big.Int, er
 		err:    err,
 	}
 }
+
+var testRefreshRate = int64(10000000000000)
+
 func TestPayment(t *testing.T) {
 	logger := logging.New(ioutil.Discard, 0)
 
@@ -81,7 +84,7 @@ func TestPayment(t *testing.T) {
 	debt := int64(10000)
 
 	observer := newTestObserver(map[string]*big.Int{peerID.String(): big.NewInt(debt)})
-	recipient := pseudosettle.New(nil, logger, storeRecipient, observer)
+	recipient := pseudosettle.New(nil, logger, storeRecipient, observer, big.NewInt(testRefreshRate))
 	recipient.SetAccountingAPI(observer)
 
 	recorder := streamtest.New(
@@ -93,7 +96,7 @@ func TestPayment(t *testing.T) {
 	defer storePayer.Close()
 
 	observer2 := newTestObserver(map[string]*big.Int{})
-	payer := pseudosettle.New(recorder, logger, storePayer, observer2)
+	payer := pseudosettle.New(recorder, logger, storePayer, observer2, big.NewInt(testRefreshRate))
 	payer.SetAccountingAPI(observer2)
 
 	amount := big.NewInt(debt)
