@@ -308,13 +308,13 @@ func (s *Service) SettlementsSent() (map[string]*big.Int, error) {
 			return false, fmt.Errorf("parse address from key: %s: %w", string(key), err)
 		}
 		if _, ok := sent[addr.String()]; !ok {
-			var storevalue *big.Int
+			var storevalue lastPayment
 			err = s.store.Get(totalKey(addr, SettlementSentPrefix), &storevalue)
 			if err != nil {
 				return false, fmt.Errorf("get peer %s settlement balance: %w", addr.String(), err)
 			}
 
-			sent[addr.String()] = storevalue
+			sent[addr.String()] = storevalue.Total
 		}
 		return false, nil
 	})
@@ -333,13 +333,13 @@ func (s *Service) SettlementsReceived() (map[string]*big.Int, error) {
 			return false, fmt.Errorf("parse address from key: %s: %w", string(key), err)
 		}
 		if _, ok := received[addr.String()]; !ok {
-			var storevalue *big.Int
+			var storevalue lastPayment
 			err = s.store.Get(totalKey(addr, SettlementReceivedPrefix), &storevalue)
 			if err != nil {
 				return false, fmt.Errorf("get peer %s settlement balance: %w", addr.String(), err)
 			}
 
-			received[addr.String()] = storevalue
+			received[addr.String()] = storevalue.Total
 		}
 		return false, nil
 	})
