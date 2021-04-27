@@ -47,6 +47,10 @@ func newTestObserver(debtAmounts map[string]*big.Int) *testObserver {
 	}
 }
 
+func (t *testObserver) setPeerDebt(peer swarm.Address, debt *big.Int) {
+	t.peerDebts[peer.String()] = debt
+}
+
 func (t *testObserver) PeerDebt(peer swarm.Address) (*big.Int, error) {
 	if debt, ok := t.peerDebts[peer.String()]; ok {
 		return debt, nil
@@ -71,7 +75,7 @@ func (t *testObserver) NotifyPaymentSent(peer swarm.Address, amount *big.Int, er
 	}
 }
 
-var testRefreshRate = int64(10000000000000)
+var testRefreshRate = int64(10000)
 
 func TestPayment(t *testing.T) {
 	logger := logging.New(ioutil.Discard, 0)
@@ -184,3 +188,323 @@ func TestPayment(t *testing.T) {
 		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
 	}
 }
+
+func TestTimeLimitedPayment(t *testing.T) {
+	logger := logging.New(ioutil.Discard, 0)
+
+	storeRecipient := mock.NewStateStore()
+	defer storeRecipient.Close()
+
+	peerID := swarm.MustParseHexAddress("9ee7add7")
+
+	debt := int64(10000)
+
+	observer := newTestObserver(map[string]*big.Int{peerID.String(): big.NewInt(debt)})
+	recipient := pseudosettle.New(nil, logger, storeRecipient, observer, big.NewInt(testRefreshRate))
+	recipient.SetAccountingAPI(observer)
+
+	recorder := streamtest.New(
+		streamtest.WithProtocols(recipient.Protocol()),
+		streamtest.WithBaseAddr(peerID),
+	)
+
+	storePayer := mock.NewStateStore()
+	defer storePayer.Close()
+
+	observer2 := newTestObserver(map[string]*big.Int{})
+	payer := pseudosettle.New(recorder, logger, storePayer, observer2, big.NewInt(testRefreshRate))
+	payer.SetAccountingAPI(observer2)
+
+	payer.SetTime(int64(10000))
+	recipient.SetTime(int64(10000))
+
+	amount := big.NewInt(debt)
+
+	payer.Pay(context.Background(), peerID, amount)
+
+	records, err := recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if l := len(records); l != 1 {
+		t.Fatalf("got %v records, want %v", l, 1)
+	}
+
+	record := records[0]
+
+	if err := record.Err(); err != nil {
+		t.Fatalf("record error: %v", err)
+	}
+
+	messages, err := protobuf.ReadMessages(
+		bytes.NewReader(record.In()),
+		func() protobuf.Message { return new(pb.Payment) },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("got %v messages, want %v", len(messages), 1)
+	}
+
+	sentAmount := big.NewInt(0).SetBytes(messages[0].(*pb.Payment).Amount)
+	if sentAmount.Cmp(amount) != 0 {
+		t.Fatalf("got message with amount %v, want %v", sentAmount, amount)
+	}
+
+	select {
+	case call := <-observer.receivedCalled:
+		if call.amount.Cmp(amount) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, amount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	select {
+	case call := <-observer2.sentCalled:
+		if call.amount.Cmp(amount) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, amount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+		if call.err != nil {
+			t.Fatalf("observer called with error. got %v want nil", call.err)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	totalSent, err := payer.TotalSent(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalSent.Cmp(sentAmount) != 0 {
+		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, sentAmount)
+	}
+
+	totalReceived, err := recipient.TotalReceived(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalReceived.Cmp(sentAmount) != 0 {
+		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
+	}
+
+	// Let 3 seconds pass, attempt settlement below time based refreshment rate
+
+	debt = testRefreshRate * 3 / 2
+	amount = big.NewInt(debt)
+
+	payer.SetTime(int64(10003))
+	recipient.SetTime(int64(10003))
+
+	observer.setPeerDebt(peerID, amount)
+
+	payer.Pay(context.Background(), peerID, amount)
+
+	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if l := len(records); l != 2 {
+		t.Fatalf("got %v records, want %v", l, 1)
+	}
+
+	record = records[1]
+
+	if err := record.Err(); err != nil {
+		t.Fatalf("record error: %v", err)
+	}
+
+	messages, err = protobuf.ReadMessages(
+		bytes.NewReader(record.In()),
+		func() protobuf.Message { return new(pb.Payment) },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("got %v messages, want %v", len(messages), 1)
+	}
+
+	sentAmount = big.NewInt(0).SetBytes(messages[0].(*pb.Payment).Amount)
+	if sentAmount.Cmp(amount) != 0 {
+		t.Fatalf("got message with amount %v, want %v", sentAmount, amount)
+	}
+
+	select {
+	case call := <-observer.receivedCalled:
+		if call.amount.Cmp(amount) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, amount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	select {
+	case call := <-observer2.sentCalled:
+		if call.amount.Cmp(amount) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, amount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+		if call.err != nil {
+			t.Fatalf("observer called with error. got %v want nil", call.err)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	totalSent, err = payer.TotalSent(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalSent.Cmp(sentAmount.Add(sentAmount, big.NewInt(10000))) != 0 {
+		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, 25000)
+	}
+
+	totalReceived, err = recipient.TotalReceived(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalReceived.Cmp(sentAmount) != 0 {
+		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
+	}
+
+	// attempt settlement over the time-based allowed limit 1 seconds later
+
+	debt = 3 * testRefreshRate
+	amount = big.NewInt(debt)
+
+	payer.SetTime(int64(10004))
+	recipient.SetTime(int64(10004))
+
+	observer.setPeerDebt(peerID, amount)
+
+	payer.Pay(context.Background(), peerID, amount)
+
+	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if l := len(records); l != 3 {
+		t.Fatalf("got %v records, want %v", l, 1)
+	}
+
+	record = records[2]
+
+	if err := record.Err(); err != nil {
+		t.Fatalf("record error: %v", err)
+	}
+
+	messages, err = protobuf.ReadMessages(
+		bytes.NewReader(record.In()),
+		func() protobuf.Message { return new(pb.Payment) },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("got %v messages, want %v", len(messages), 1)
+	}
+
+	testRefreshRateBigInt := big.NewInt(testRefreshRate)
+
+	sentAmount = big.NewInt(0).SetBytes(messages[0].(*pb.Payment).Amount)
+	if sentAmount.Cmp(testRefreshRateBigInt) != 0 {
+		t.Fatalf("got message with amount %v, want %v", sentAmount, testRefreshRate)
+	}
+
+	select {
+	case call := <-observer.receivedCalled:
+		if call.amount.Cmp(testRefreshRateBigInt) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, testRefreshRate)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	select {
+	case call := <-observer2.sentCalled:
+		if call.amount.Cmp(testRefreshRateBigInt) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, testRefreshRate)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+		if call.err != nil {
+			t.Fatalf("observer called with error. got %v want nil", call.err)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	totalSent, err = payer.TotalSent(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalSent.Cmp(sentAmount.Add(sentAmount, big.NewInt(25000))) != 0 {
+		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, 35000)
+	}
+
+	totalReceived, err = recipient.TotalReceived(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalReceived.Cmp(sentAmount) != 0 {
+		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
+	}
+
+}
+
+/*
+
+func (t *testObserver) setPeerDebt(peer swarm.Address, debt *big.Int) {
+	t.peerDebts[peer.String()] = debt
+}
+
+func (t *testObserver) PeerDebt(peer swarm.Address) (*big.Int, error) {
+	if debt, ok := t.peerDebts[peer.String()]; ok {
+		return debt, nil
+	}
+
+	return nil, errors.New("Peer not listed")
+}
+
+*/

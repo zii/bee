@@ -41,6 +41,7 @@ type Service struct {
 	accountingAPI settlement.AccountingAPI
 	metrics       metrics
 	refreshRate   *big.Int
+	timeNow       func() time.Time
 }
 
 type lastPayment struct {
@@ -56,6 +57,7 @@ func New(streamer p2p.Streamer, logger logging.Logger, store storage.StateStorer
 		store:         store,
 		accountingAPI: accountingAPI,
 		refreshRate:   refreshRate,
+		timeNow:       time.Now,
 	}
 }
 
@@ -99,7 +101,7 @@ func (s *Service) peerAllowance(peer swarm.Address) (limit *big.Int, stamp int64
 		lastTime.Timestamp = int64(0)
 	}
 
-	currentTime := time.Now().Unix()
+	currentTime := s.timeNow().Unix()
 	if currentTime == lastTime.Timestamp {
 		return nil, 0, ErrSettlementTooSoon
 	}
@@ -208,7 +210,7 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) 
 		lastTime.Timestamp = 0
 	}
 
-	currentTime := time.Now().Unix()
+	currentTime := s.timeNow().Unix()
 	if currentTime == lastTime.Timestamp {
 		err = ErrSettlementTooSoon
 		return

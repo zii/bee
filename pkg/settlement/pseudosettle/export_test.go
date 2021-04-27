@@ -4,7 +4,21 @@
 
 package pseudosettle
 
+import (
+	"time"
+)
+
 const (
 	AllowanceFieldName = allowanceFieldName
 	TimestampFieldName = timestampFieldName
 )
+
+func (s *Service) SetTimeNow(f func() time.Time) {
+	s.timeNow = f
+}
+
+func (s *Service) SetTime(k int64) {
+	s.SetTimeNow(func() time.Time {
+		return time.Unix(k, 0)
+	})
+}
