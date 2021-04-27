@@ -197,7 +197,7 @@ func TestTimeLimitedPayment(t *testing.T) {
 
 	peerID := swarm.MustParseHexAddress("9ee7add7")
 
-	debt := int64(10000)
+	debt := testRefreshRate
 
 	observer := newTestObserver(map[string]*big.Int{peerID.String(): big.NewInt(debt)})
 	recipient := pseudosettle.New(nil, logger, storeRecipient, observer, big.NewInt(testRefreshRate))
@@ -303,6 +303,8 @@ func TestTimeLimitedPayment(t *testing.T) {
 		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
 	}
 
+	sentSum := big.NewInt(testRefreshRate)
+
 	// Let 3 seconds pass, attempt settlement below time based refreshment rate
 
 	debt = testRefreshRate * 3 / 2
@@ -314,6 +316,8 @@ func TestTimeLimitedPayment(t *testing.T) {
 	observer.setPeerDebt(peerID, amount)
 
 	payer.Pay(context.Background(), peerID, amount)
+
+	sentSum := sentSum.Add(sentSum, debt)
 
 	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
 	if err != nil {
@@ -383,8 +387,8 @@ func TestTimeLimitedPayment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if totalSent.Cmp(sentAmount.Add(sentAmount, big.NewInt(10000))) != 0 {
-		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, 25000)
+	if totalSent.Cmp(sentSum) != 0 {
+		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, sentSum)
 	}
 
 	totalReceived, err = recipient.TotalReceived(peerID)
@@ -407,6 +411,8 @@ func TestTimeLimitedPayment(t *testing.T) {
 	observer.setPeerDebt(peerID, amount)
 
 	payer.Pay(context.Background(), peerID, amount)
+
+	sentSum := sentSum.Add(sentSum, testRefreshRateBigInt)
 
 	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
 	if err != nil {
@@ -478,8 +484,8 @@ func TestTimeLimitedPayment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if totalSent.Cmp(sentAmount.Add(sentAmount, big.NewInt(25000))) != 0 {
-		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, 35000)
+	if totalSent.Cmp(sentSum) != 0 {
+		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, sentSum)
 	}
 
 	totalReceived, err = recipient.TotalReceived(peerID)
@@ -578,5 +584,102 @@ func TestTimeLimitedPayment(t *testing.T) {
 
 	case <-time.After(time.Second):
 		t.Fatal("expected observer to be called")
+	}
+
+	// attempt multiple seconds later with debt over time based allowance
+
+	debt = 9 * testRefreshRate
+	amount = big.NewInt(debt)
+
+	payer.SetTime(int64(10010))
+	recipient.SetTime(int64(10010))
+
+	observer.setPeerDebt(peerID, amount)
+
+	payer.Pay(context.Background(), peerID, amount)
+
+	sentSum := sentSum.Add(sentSum, big.NewInt(6*testRefreshRate))
+
+	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if l := len(records); l != 5 {
+		t.Fatalf("got %v records, want %v", l, 5)
+	}
+
+	record = records[4]
+
+	if err := record.Err(); err != nil {
+		t.Fatalf("record error: %v", err)
+	}
+
+	messages, err = protobuf.ReadMessages(
+		bytes.NewReader(record.In()),
+		func() protobuf.Message { return new(pb.Payment) },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("got %v messages, want %v", len(messages), 1)
+	}
+
+	testAmount := big.NewInt(6 * testRefreshRate)
+
+	sentAmount = big.NewInt(0).SetBytes(messages[0].(*pb.Payment).Amount)
+	if sentAmount.Cmp(testAmount) != 0 {
+		t.Fatalf("got message with amount %v, want %v", sentAmount, testAmount)
+	}
+
+	select {
+	case call := <-observer.receivedCalled:
+		if call.amount.Cmp(testAmount) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, testAmount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	select {
+	case call := <-observer2.sentCalled:
+		if call.amount.Cmp(testAmount) != 0 {
+			t.Fatalf("observer called with wrong amount. got %d, want %d", call.amount, testAmount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+		if call.err != nil {
+			t.Fatalf("observer called with error. got %v want nil", call.err)
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	totalSent, err = payer.TotalSent(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalSent.Cmp(sentSum) != 0 {
+		t.Fatalf("stored wrong totalSent. got %d, want %d", totalSent, sentSum)
+	}
+
+	totalReceived, err = recipient.TotalReceived(peerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if totalReceived.Cmp(sentAmount) != 0 {
+		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
 	}
 }
