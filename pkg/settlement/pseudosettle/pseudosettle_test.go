@@ -317,7 +317,7 @@ func TestTimeLimitedPayment(t *testing.T) {
 
 	payer.Pay(context.Background(), peerID, amount)
 
-	sentSum := sentSum.Add(sentSum, debt)
+	sentSum = sentSum.Add(sentSum, amount)
 
 	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
 	if err != nil {
@@ -396,8 +396,8 @@ func TestTimeLimitedPayment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if totalReceived.Cmp(sentAmount) != 0 {
-		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
+	if totalReceived.Cmp(sentSum) != 0 {
+		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentSum)
 	}
 
 	// attempt settlement over the time-based allowed limit 1 seconds later
@@ -412,7 +412,9 @@ func TestTimeLimitedPayment(t *testing.T) {
 
 	payer.Pay(context.Background(), peerID, amount)
 
-	sentSum := sentSum.Add(sentSum, testRefreshRateBigInt)
+	testRefreshRateBigInt := big.NewInt(testRefreshRate)
+
+	sentSum = sentSum.Add(sentSum, testRefreshRateBigInt)
 
 	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
 	if err != nil {
@@ -440,8 +442,6 @@ func TestTimeLimitedPayment(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("got %v messages, want %v", len(messages), 1)
 	}
-
-	testRefreshRateBigInt := big.NewInt(testRefreshRate)
 
 	sentAmount = big.NewInt(0).SetBytes(messages[0].(*pb.Payment).Amount)
 	if sentAmount.Cmp(testRefreshRateBigInt) != 0 {
@@ -493,8 +493,8 @@ func TestTimeLimitedPayment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if totalReceived.Cmp(sentAmount) != 0 {
-		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
+	if totalReceived.Cmp(sentSum) != 0 {
+		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentSum)
 	}
 
 	// attempt settle again in the same second without success
@@ -598,7 +598,7 @@ func TestTimeLimitedPayment(t *testing.T) {
 
 	payer.Pay(context.Background(), peerID, amount)
 
-	sentSum := sentSum.Add(sentSum, big.NewInt(6*testRefreshRate))
+	sentSum = sentSum.Add(sentSum, big.NewInt(6*testRefreshRate))
 
 	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
 	if err != nil {
@@ -679,7 +679,7 @@ func TestTimeLimitedPayment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if totalReceived.Cmp(sentAmount) != 0 {
-		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
+	if totalReceived.Cmp(sentSum) != 0 {
+		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentSum)
 	}
 }
