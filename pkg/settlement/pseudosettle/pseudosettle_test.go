@@ -321,7 +321,7 @@ func TestTimeLimitedPayment(t *testing.T) {
 	}
 
 	if l := len(records); l != 2 {
-		t.Fatalf("got %v records, want %v", l, 1)
+		t.Fatalf("got %v records, want %v", l, 2)
 	}
 
 	record = records[1]
@@ -414,7 +414,7 @@ func TestTimeLimitedPayment(t *testing.T) {
 	}
 
 	if l := len(records); l != 3 {
-		t.Fatalf("got %v records, want %v", l, 1)
+		t.Fatalf("got %v records, want %v", l, 3)
 	}
 
 	record = records[2]
@@ -491,20 +491,92 @@ func TestTimeLimitedPayment(t *testing.T) {
 		t.Fatalf("stored wrong totalReceived. got %d, want %d", totalReceived, sentAmount)
 	}
 
-}
+	// attempt settle again in the same second without success
 
-/*
+	debt = 4 * testRefreshRate
+	amount = big.NewInt(debt)
 
-func (t *testObserver) setPeerDebt(peer swarm.Address, debt *big.Int) {
-	t.peerDebts[peer.String()] = debt
-}
+	observer.setPeerDebt(peerID, amount)
 
-func (t *testObserver) PeerDebt(peer swarm.Address) (*big.Int, error) {
-	if debt, ok := t.peerDebts[peer.String()]; ok {
-		return debt, nil
+	payer.Pay(context.Background(), peerID, amount)
+
+	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	return nil, errors.New("Peer not listed")
-}
+	if l := len(records); l != 3 {
+		t.Fatalf("got %v records, want %v", l, 3)
+	}
 
-*/
+	select {
+	case <-observer.receivedCalled:
+		t.Fatal("unexpected observer to be called")
+
+	case <-time.After(time.Second):
+
+	}
+
+	select {
+	case call := <-observer2.sentCalled:
+		if call.amount != nil {
+			t.Fatalf("observer called with wrong amount. got %d, want nil", call.amount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+		if call.err == nil {
+			t.Fatalf("observer called without error. got nil want err")
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+
+	// attempt again while recipient is still supposed to be blocking based on time
+
+	debt = 2 * testRefreshRate
+	amount = big.NewInt(debt)
+
+	payer.SetTime(int64(10005))
+	recipient.SetTime(int64(10004))
+
+	observer.setPeerDebt(peerID, amount)
+
+	payer.Pay(context.Background(), peerID, amount)
+
+	records, err = recorder.Records(peerID, "pseudosettle", "1.0.0", "pseudosettle")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if l := len(records); l != 4 {
+		t.Fatalf("got %v records, want %v", l, 4)
+	}
+
+	select {
+	case <-observer.receivedCalled:
+		t.Fatal("unexpected observer to be called")
+
+	case <-time.After(time.Second):
+
+	}
+
+	select {
+	case call := <-observer2.sentCalled:
+		if call.amount != nil {
+			t.Fatalf("observer called with wrong amount. got %d, want nil", call.amount)
+		}
+
+		if !call.peer.Equal(peerID) {
+			t.Fatalf("observer called with wrong peer. got %v, want %v", call.peer, peerID)
+		}
+		if call.err == nil {
+			t.Fatalf("observer called without error. got nil want err")
+		}
+
+	case <-time.After(time.Second):
+		t.Fatal("expected observer to be called")
+	}
+}
