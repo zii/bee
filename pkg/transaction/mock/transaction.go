@@ -25,6 +25,8 @@ type transactionServiceMock struct {
 	pendingTransactions  func() ([]common.Hash, error)
 	resendTransaction    func(txHash common.Hash) error
 	storedTransaction    func(txHash common.Hash) (*transaction.StoredTransaction, error)
+	boostTransaction     func(originalTxHash common.Hash, gasPrice *big.Int) (common.Hash, error)
+	cancelTransaction    func(originalTxHash common.Hash, gasPrice *big.Int) (common.Hash, error)
 }
 
 func (m *transactionServiceMock) Send(ctx context.Context, request *transaction.TxRequest) (txHash common.Hash, err error) {
@@ -74,6 +76,20 @@ func (m *transactionServiceMock) StoredTransaction(txHash common.Hash) (*transac
 		return m.storedTransaction(txHash)
 	}
 	return nil, errors.New("not implemented")
+}
+
+func (m *transactionServiceMock) BoostTransaction(originalTxHash common.Hash, gasPrice *big.Int) (common.Hash, error) {
+	if m.boostTransaction != nil {
+		return m.boostTransaction(originalTxHash, gasPrice)
+	}
+	return common.Hash{}, errors.New("not implemented")
+}
+
+func (m *transactionServiceMock) CancelTransaction(originalTxHash common.Hash, gasPrice *big.Int) (common.Hash, error) {
+	if m.send != nil {
+		return m.cancelTransaction(originalTxHash, gasPrice)
+	}
+	return common.Hash{}, errors.New("not implemented")
 }
 
 func (m *transactionServiceMock) Close() error {
