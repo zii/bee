@@ -131,7 +131,7 @@ func Init(
 		}
 		if err == storage.ErrNotFound {
 			logger.Info("no chequebook found, deploying new one.")
-			if swapInitialDeposit.Cmp(big.NewInt(0)) != 0 {
+			if true || swapInitialDeposit.Cmp(big.NewInt(0)) != 0 {
 				err = checkBalance(ctx, logger, swapInitialDeposit, swapBackend, chainId, overlayEthAddress, erc20Service)
 				if err != nil {
 					return nil, err
