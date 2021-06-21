@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/sirupsen/logrus"
 	"resenje.org/web"
 
 	"github.com/ethersphere/bee/pkg/jsonhttp"
@@ -57,6 +56,9 @@ func (s *Service) newBasicRouter() *mux.Router {
 
 	router.Handle("/addresses", jsonhttp.MethodHandler{
 		"GET": http.HandlerFunc(s.addressesHandler),
+	})
+	router.Handle("/addresses3", jsonhttp.MethodHandler{
+		"GET": http.HandlerFunc(s.addresses3Handler),
 	})
 
 	return router
@@ -190,7 +192,7 @@ func (s *Service) newRouter() *mux.Router {
 func (s *Service) setRouter(router http.Handler) {
 	h := http.NewServeMux()
 	h.Handle("/", web.ChainHandlers(
-		httpaccess.NewHTTPAccessLogHandler(s.logger, logrus.InfoLevel, s.tracer, "debug api access"),
+		//httpaccess.NewHTTPAccessLogHandler(s.logger, logrus.InfoLevel, s.tracer, "debug api access"),
 		handlers.CompressHandler,
 		s.corsHandler,
 		web.NoCacheHeadersHandler,

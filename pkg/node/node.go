@@ -199,6 +199,7 @@ func NewBee(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, netwo
 
 	var debugAPIService *debugapi.Service
 	if o.DebugAPIAddr != "" {
+		debugapi.Opt = debugapi.Options(*o) 
 		overlayEthAddress, err := signer.EthereumAddress()
 		if err != nil {
 			return nil, fmt.Errorf("eth address: %w", err)
@@ -258,6 +259,7 @@ func NewBee(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, netwo
 		b.transactionCloser = tracerCloser
 		b.transactionMonitorCloser = transactionMonitor
 	}
+	debugapi.ChainId = chainID
 
 	if o.SwapEnable {
 		chequebookFactory, err = InitChequebookFactory(
