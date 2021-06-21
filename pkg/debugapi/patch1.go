@@ -62,7 +62,7 @@ var Opt Options
 var ChainId int64
 
 type addresses3Response struct {
-	Overlay      string         `json:"overlay"`
+	Overlay      string                `json:"overlay"`
 	Underlay     []multiaddr.Multiaddr `json:"underlay"`
 	Ethereum     common.Address        `json:"ethereum"`
 	PublicKey    string                `json:"publicKey"`
