@@ -3,6 +3,7 @@ package debugapi
 import (
 	"encoding/hex"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/ethersphere/bee/pkg/logging"
@@ -77,13 +78,14 @@ func (s *Service) addresses3Handler(w http.ResponseWriter, r *http.Request) {
 	if s.overlay != nil {
 		overlay = s.overlay.String()
 	}
+	datadir, _ := filepath.Abs(Opt.DataDir)
 	jsonhttp.OK(w, addresses3Response{
 		Overlay:      overlay,
 		Ethereum:     s.ethereumAddress,
 		PublicKey:    hex.EncodeToString(crypto.EncodeSecp256k1PublicKey(&s.publicKey)),
 		PSSPublicKey: hex.EncodeToString(crypto.EncodeSecp256k1PublicKey(&s.pssPublicKey)),
 		Bootmode:     Opt.BootnodeMode,
-		DataDir:      Opt.DataDir,
+		DataDir:      datadir,
 		ChainId:      int(ChainId),
 	})
 }
