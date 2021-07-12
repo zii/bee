@@ -57,6 +57,7 @@ type Options struct {
 	BlockTime                  uint64
 	DeployGasPrice             string
 	WarmupTime                 time.Duration
+	ChainID                    int64
 }
 
 var Opt Options
